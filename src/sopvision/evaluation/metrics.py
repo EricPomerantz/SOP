@@ -6,12 +6,12 @@ from typing import Literal
 from pydantic import BaseModel
 
 from sopvision.dataset import Segment
-from sopvision.sop.types import Alert, StepState
+from sopvision.sop.types import StepState
 
 VIOLATIONS_FORBIDDEN_ON_TEST = {"order_violation", "part_removed", "sop_incomplete"}
 MEDIAN_ERROR_MAX = 2.0
 WORST_ERROR_MAX = 4.0
-OFFSOP_GRACE = 1.5
+BOUNDARY_GRACE = 1.0
 
 
 class EvalVideo(BaseModel):
@@ -21,7 +21,7 @@ class EvalVideo(BaseModel):
     steps: dict[str, dict]  # id -> {status, done_t, error, source}, in SOP order
     alerts: list[dict]
     frames: list[dict]  # [{t, slots: {slot: state}}] — every frame, for Docker parity
-    offsop: list[bool]  # per ground-truth off-SOP segment: was it flagged?
+    offsop: list[bool]  # per ground-truth off-SOP segment: handled cleanly (see offsop_clean)?
     latency_ms: dict[str, float]
     expected_alerts: list[dict] = []  # scenario videos: what they must raise
 
@@ -40,9 +40,23 @@ def step_errors(segments: list[Segment], steps: list[StepState]) -> dict[str, fl
             for s in steps if s.id in ends}
 
 
-def offsop_flagged(segments: list[Segment], alerts: list[Alert], grace: float = OFFSOP_GRACE) -> list[bool]:
-    times = [a.t for a in alerts if a.kind == "off_sop"]
-    return [any(s.start <= t <= s.end + grace for t in times) for s in segments if s.step_id == "off_sop"]
+def offsop_clean(segments: list[Segment], steps: list[StepState], decisions: list[tuple[float, str]],
+                 grace: float = BOUNDARY_GRACE) -> list[bool]:
+    """Per ground-truth off-SOP segment: no step progressed and Jev called it idle or off-SOP (criterion 3).
+
+    The step that ended where the segment starts may still complete inside it (that's step timing, scored by
+    criterion 2), and Jev answers in the segment's first `grace` seconds are about that step, so they're skipped.
+    """
+    results, previous = [], None
+    for seg in segments:
+        if seg.step_id != "off_sop":
+            previous = seg.step_id
+            continue
+        no_progress = all(s.id == previous or s.status != "done" or s.done_t is None or not seg.start <= s.done_t <= seg.end
+                          for s in steps)
+        jev_ok = all(answer in ("idle", "off_sop") for t, answer in decisions if seg.start + grace <= t <= seg.end)
+        results.append(no_progress and jev_ok)
+    return results
 
 
 def _has(alerts: list[dict], expected: dict) -> bool:

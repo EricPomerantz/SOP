@@ -92,7 +92,9 @@ class SopTracker:
             if step.status != "done":
                 if self._evidence_holds(sid, scene):
                     since = self._evidence_since.setdefault(sid, t)
-                    if t - since >= self.sop.decisions.evidence_only_after:
+                    wait = (self.sop.decisions.hands_off_seconds if self.sop.step(sid).hands_off
+                            else self.sop.decisions.evidence_only_after)
+                    if t - since >= wait:
                         out += self._complete(sid, t, "evidence")
                 else:
                     self._evidence_since.pop(sid, None)
@@ -120,8 +122,11 @@ class SopTracker:
 
     # -- rules ---------------------------------------------------------------------------------------------
     def _evidence_holds(self, sid: str, scene: SceneState) -> bool:
+        """Every evidence slot holds the required part — and, for hands_off steps, nobody is touching it."""
+        step = self.sop.step(sid)
         return all(slot in scene.slots and scene.slots[slot].effective() == want
-                   for slot, want in self.sop.step(sid).evidence.items())
+                   and not (step.hands_off and scene.slots[slot].touched)
+                   for slot, want in step.evidence.items())
 
     def _contradicted(self, sid: str, scene: SceneState) -> bool:
         """An evidence slot is *observed* (not occluded/unknown) in the opposite state."""

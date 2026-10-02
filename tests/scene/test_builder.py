@@ -106,3 +106,28 @@ def test_version_increments_and_jev_dict_shape(sop):
     assert d["slots"]["fan_bay_1"] == {"state": "empty", "conf": 0.9}
     assert d["hands"] == [{"near": "fan_bay_2"}]
     assert "chassis_box" not in d
+
+
+def test_touched_when_a_hand_overlaps_the_part(sop):
+    b = SceneBuilder(sop)
+    fan1 = at(sop, "fan_bay_1", "fan")
+    s, _ = b.update(0.0, [chassis(), fan1, det_at("hand", 0.9, 0.1, size=40)])
+    assert s.slots["fan_bay_1"].touched is False
+    u, v = sop.layout.slots["fan_bay_1"].at
+    s, _ = b.update(0.1, [chassis(), fan1, det_at("hand", u + 0.03, v, size=40)])
+    assert s.slots["fan_bay_1"].touched is True
+
+
+def test_hand_on_a_corner_of_the_cover_counts_as_touching(sop):
+    b = SceneBuilder(sop)
+    cover = at(sop, "cover", "cover", w=600, h=400)  # big part: 0.6 x 0.8 of the chassis
+    u, v = sop.layout.slots["cover"].at
+    s, _ = b.update(0.0, [chassis(), cover, det_at("hand", u + 0.28, v + 0.35, size=40)])
+    assert s.slots["cover"].touched is True
+
+
+def test_occluded_slot_counts_as_touched(sop):
+    b = SceneBuilder(sop)
+    settle_empty(b, sop)
+    s, _ = b.update(1.0, [chassis(), at(sop, "fan_bay_1", "hand", size=80)])
+    assert s.slots["fan_bay_1"].state == "occluded" and s.slots["fan_bay_1"].touched is True

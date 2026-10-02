@@ -58,3 +58,8 @@ def test_must_precede_by_order_mode(sop):
     assert grouped.must_precede("psu_1") == FANS
     assert grouped.must_precede("fan_3") == set()
     assert grouped.must_precede("cover") == FANS | {"psu_1", "psu_2"}
+
+
+def test_hands_off_steps_and_timing(sop):
+    assert sop.step("cover").hands_off is True and sop.step("fan_1").hands_off is False
+    assert sop.decisions.evidence_only_after == 1.0 and sop.decisions.hands_off_seconds == 0.5

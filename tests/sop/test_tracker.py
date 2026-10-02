@@ -11,10 +11,12 @@ def decision(t, current="idle", conf=0.9, done=0.0, anomaly=0.0, active="fan_1",
 
 
 def view(spec: str) -> SlotView:
+    touched = spec.endswith("+touched")  # e.g. "installed+touched"
+    spec = spec.removesuffix("+touched")
     if ":" in spec:  # e.g. "occluded:installed"
         state, last = spec.split(":")
-        return SlotView(state, last=last)
-    return SlotView(spec, 0.9, spec)
+        return SlotView(state, last=last, touched=True if state == "occluded" else touched)
+    return SlotView(spec, 0.9, spec, touched)
 
 
 def scene_with(t, slots: dict[str, str]) -> SceneState:
@@ -22,6 +24,10 @@ def scene_with(t, slots: dict[str, str]) -> SceneState:
 
 
 S0 = scene_with(0.0, {})
+
+
+def with_timer(sop, seconds):
+    return sop.model_copy(update={"decisions": sop.decisions.model_copy(update={"evidence_only_after": seconds})})
 
 
 def alerts(items, kind=None):
@@ -70,7 +76,7 @@ def test_complete_requires_jev_and_evidence(sop):
 
 
 def test_evidence_only_after_three_seconds(sop):
-    tr = SopTracker(sop)
+    tr = SopTracker(with_timer(sop, 3.0))
     tr.on_scene(scene_with(10.0, {"fan_bay_1": "installed"}))
     assert tr.on_scene(scene_with(12.9, {"fan_bay_1": "occluded:installed"})) == []
     out = tr.on_scene(scene_with(13.0, {"fan_bay_1": "installed"}))
@@ -80,7 +86,7 @@ def test_evidence_only_after_three_seconds(sop):
 
 
 def test_evidence_timer_resets_when_evidence_breaks(sop):
-    tr = SopTracker(sop)
+    tr = SopTracker(with_timer(sop, 3.0))
     tr.on_scene(scene_with(10.0, {"fan_bay_1": "installed"}))
     tr.on_scene(scene_with(11.0, {"fan_bay_1": "empty"}))
     tr.on_scene(scene_with(12.0, {"fan_bay_1": "installed"}))
@@ -167,3 +173,41 @@ def test_active_step_falls_back_to_first_pending(sop):
     tr.on_scene(scene_with(0.0, {"fan_bay_1": "installed"}))
     tr.on_scene(scene_with(3.0, {"fan_bay_1": "installed"}))
     assert tr.active_step_id() == "fan_2"
+
+
+ALL_BEFORE_COVER = {f"fan_bay_{i}": "installed" for i in range(1, 7)} | {"psu_bay_1": "installed", "psu_bay_2": "installed"}
+
+
+def tracker_with_all_but_cover(sop):
+    tr = SopTracker(sop)
+    tr.on_scene(scene_with(0.0, ALL_BEFORE_COVER))
+    tr.on_scene(scene_with(3.0, ALL_BEFORE_COVER))
+    assert tr.active_step_id() == "cover"
+    return tr
+
+
+def test_hands_off_step_waits_until_hands_leave(sop):
+    tr = tracker_with_all_but_cover(sop)
+    for t in (10.0, 12.0, 20.0):  # cover in place but being latched for 10 s
+        assert tr.on_scene(scene_with(t, ALL_BEFORE_COVER | {"cover": "installed+touched"})) == []
+    tr.on_scene(scene_with(21.0, ALL_BEFORE_COVER | {"cover": "installed"}))
+    assert tr.statuses()["cover"] == "pending"
+    out = tr.on_scene(scene_with(21.5, ALL_BEFORE_COVER | {"cover": "installed"}))
+    assert StepUpdate(21.5, "cover", "done", "evidence") in out
+
+
+def test_jev_cannot_complete_a_hands_off_step_while_touched(sop):
+    tr = tracker_with_all_but_cover(sop)
+    touched = scene_with(10.0, ALL_BEFORE_COVER | {"cover": "installed+touched"})
+    for t in (10.0, 11.0, 12.0):
+        tr.on_decision(decision(t, "cover", done=0.95, active="cover"), touched)
+    assert tr.statuses()["cover"] != "done"
+    tr.on_decision(decision(13.0, "cover", done=0.95, active="cover"), scene_with(13.0, ALL_BEFORE_COVER | {"cover": "installed"}))
+    assert tr.statuses()["cover"] == "done"
+
+
+def test_ordinary_steps_ignore_touching(sop):
+    tr = SopTracker(sop)
+    tr.on_scene(scene_with(0.0, {"fan_bay_1": "installed+touched"}))
+    tr.on_scene(scene_with(1.0, {"fan_bay_1": "installed+touched"}))
+    assert tr.statuses()["fan_1"] == "done"

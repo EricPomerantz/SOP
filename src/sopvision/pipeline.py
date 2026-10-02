@@ -44,6 +44,7 @@ class LockstepResult:
     steps: list[StepState]
     alerts: list[Alert]
     latencies_ms: list[float]
+    decisions: list[tuple[float, str]]  # (request time, Jev's current_step answer)
 
 
 @dataclass
@@ -67,6 +68,7 @@ class RunCore:
         self.events: list[RunEvent] = []
         self.alerts: list[Alert] = []
         self.latencies_ms: list[float] = []
+        self.decisions: list[tuple[float, str]] = []
         self.last_scene: SceneState | None = None
         self.last_t = 0.0
         self._last_scene_msg = -1e9
@@ -113,6 +115,7 @@ class RunCore:
             return
         a = d.answers
         self.latencies_ms.append(a.latency_ms)
+        self.decisions.append((d.t_request, a.current_step))
         self._log(d.t_request, "decision", {"version": d.version, "active_step_id": d.active_step_id} | asdict(a))
         self.broadcast(to_ws(DecisionMsg(t=d.t_request, current_step=a.current_step, confidence=a.current_confidence,
                                          active_step_id=d.active_step_id, active_step_done=a.active_step_done,
@@ -154,7 +157,7 @@ async def run_lockstep(sop: SopConfig, source: VideoSource, detector: Detector, 
         frames.append(FrameRecord(frame.t, {k: v.state for k, v in scene.slots.items()}))
     await decider.aclose()
     core.finish()
-    return LockstepResult(frames, core.tracker.steps(), core.alerts, core.latencies_ms)
+    return LockstepResult(frames, core.tracker.steps(), core.alerts, core.latencies_ms, core.decisions)
 
 
 class LiveRun:

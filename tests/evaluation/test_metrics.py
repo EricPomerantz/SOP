@@ -2,7 +2,7 @@ import pytest
 
 from sopvision.dataset import Segment
 from sopvision.evaluation.compare import compare_reports
-from sopvision.evaluation.metrics import EvalReport, EvalVideo, check_acceptance, offsop_flagged, step_errors
+from sopvision.evaluation.metrics import EvalReport, EvalVideo, check_acceptance, offsop_clean, step_errors
 from sopvision.sop.types import Alert, StepState
 
 STEPS = ["fan_1", "fan_2", "fan_3", "fan_4", "fan_5", "fan_6", "psu_1", "psu_2", "cover"]
@@ -20,13 +20,22 @@ def test_step_errors_and_missing_steps():
     assert errs == {"fan_1": pytest.approx(0.5), "fan_2": None}
 
 
-def test_offsop_requires_alert_inside_segment():
-    def alert(t):
-        return Alert(t, "warning", "off_sop", "Off-SOP activity")
+def done(step, t):
+    return StepState(step, "done", None, t, None, "jev")
 
-    assert offsop_flagged(SEGS, [alert(3.0), alert(24.4)]) == [True, True]
-    assert offsop_flagged(SEGS, [alert(24.6)]) == [False, False]
-    assert offsop_flagged(SEGS, [Alert(3.0, "warning", "anomaly", "x")]) == [False, False]
+
+def test_offsop_clean_when_idle_and_no_step_progress():
+    steps = [done("fan_1", 15.9), done("fan_2", 21.8)]  # fan_2 just ended at 21.0 and completes inside the next segment: fine
+    decisions = [(0.5, "idle"), (21.3, "fan_2"), (22.0, "idle"), (22.5, "off_sop")]  # 21.3 is within the 1 s boundary grace
+    assert offsop_clean(SEGS, steps, decisions) == [True, True]
+
+
+def test_offsop_not_clean_when_jev_names_a_step():
+    assert offsop_clean(SEGS, [done("fan_1", 15.9)], [(2.0, "fan_1")]) == [False, True]
+
+
+def test_offsop_not_clean_when_another_step_completes():
+    assert offsop_clean(SEGS, [done("fan_1", 22.0), done("fan_2", 21.5)], []) == [True, False]
 
 
 def video(vid="test:Install_12", kind="test", shift=0.0, kinds=("off_sop",), corrupt=0.0, done=STEPS, extra=None):

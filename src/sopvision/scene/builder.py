@@ -88,7 +88,7 @@ class SceneBuilder:
         if det is not None:
             reading = "installed" if det.cls == spec.filled_by else "empty"
         elif any(box_distance_norm(spec.at, hb, box) <= radius for hb in hand_boxes):
-            return SlotView("occluded", last=track.observed)
+            return SlotView("occluded", last=track.observed, touched=True)
         elif spec.empty_as is None:
             reading = "empty"  # e.g. the cover: nothing there and nothing in the way means not installed
         else:
@@ -104,9 +104,10 @@ class SceneBuilder:
                                      to_state=track.pending))
             track.observed, track.pending = track.pending, None
             track.conf = det.conf if det else None
+        touched = det is not None and any(_intersects(det.xyxy, hb) for hb in hand_boxes)
         if track.observed is None:
-            return SlotView("unknown")
-        return SlotView(track.observed, track.conf, track.observed)
+            return SlotView("unknown", touched=touched)
+        return SlotView(track.observed, track.conf, track.observed, touched)
 
     def _zone(self, hand_box, box) -> str:
         hx, hy = center_norm(Detection("hand", hand_box, 0.0, None), box)

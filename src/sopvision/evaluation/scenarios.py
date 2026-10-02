@@ -20,13 +20,14 @@ class ScenarioSpec:
     positions: list[int]  # clip positions to play, in order
     reverse_last: bool  # play the last listed clip backwards (a part being taken out)
     expected_alerts: list[dict]
+    hold_before_reverse: float = 0.0  # seconds to hold the last forward frame, so the part counts as done first
 
 
 SCENARIOS = [
     ScenarioSpec("incomplete_run", [1, 2, 3, 4, 5], False,
                  [{"kind": "sop_incomplete", "missing": ["fan_5", "fan_6", "psu_1", "psu_2", "cover"]}]),
     ScenarioSpec("fan_removed", [1, 2, 3, 4, 4], True,
-                 [{"kind": "part_removed", "step_id": "fan_3"}, {"kind": "sop_incomplete"}]),
+                 [{"kind": "part_removed", "step_id": "fan_3"}, {"kind": "sop_incomplete"}], hold_before_reverse=3.0),
 ]
 
 
@@ -63,6 +64,9 @@ def render_scenario(run: RunIndex, spec: ScenarioSpec, out_dir: Path, freeze_sec
     try:
         for i, pos in enumerate(spec.positions):
             backwards = spec.reverse_last and i == len(spec.positions) - 1
+            if backwards and last is not None:
+                for _ in range(round(spec.hold_before_reverse * fps)):
+                    writer.write(last)
             for frame in (_reversed if backwards else _frames)(clips[pos].path):
                 writer.write(frame)
                 last = frame

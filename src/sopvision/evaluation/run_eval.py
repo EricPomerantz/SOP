@@ -9,7 +9,7 @@ from typing import Literal
 
 from sopvision.config import SopConfig
 from sopvision.dataset import RunIndex, load_index
-from sopvision.evaluation.metrics import EvalReport, EvalVideo, check_acceptance, offsop_flagged, step_errors
+from sopvision.evaluation.metrics import EvalReport, EvalVideo, check_acceptance, offsop_clean, step_errors
 from sopvision.pipeline import LockstepResult, run_lockstep
 from sopvision.settings import Settings
 from sopvision.sources.file import FileSource
@@ -33,7 +33,7 @@ def video_from_result(vid: str, kind: Literal["test", "scenario"], res: Lockstep
     return EvalVideo(
         id=vid, kind=kind, step_order=order, steps=steps, alerts=[asdict(a) for a in res.alerts],
         frames=[{"t": round(f.t, 3), "slots": f.slots} for f in res.frames],
-        offsop=offsop_flagged(run.segments, res.alerts) if run else [],
+        offsop=offsop_clean(run.segments, res.steps, res.decisions) if run else [],
         latency_ms=latency_stats(res.latencies_ms), expected_alerts=expected)
 
 
@@ -82,7 +82,7 @@ def summary_lines(report: EvalReport) -> list[str]:
              f"alerts {sorted({a['kind'] for a in v.alerts})}, Jev p50 {v.latency_ms['p50']:.0f} ms" for v in report.videos]
     if errors:
         lines.append(f"step timing error: median {sorted(errors)[len(errors) // 2]:.2f} s, max {max(errors):.2f} s")
-    names = {"c1": "all steps done in order", "c2": "timing within 2 s median / 4 s max", "c3": "off-SOP segments flagged",
+    names = {"c1": "all steps done in order", "c2": "timing within 2 s median / 4 s max", "c3": "off-SOP segments: idle/off-SOP, no step progress",
              "c4": "no violations on clean runs", "c5": "scenarios raise expected alerts"}
     lines += [f"{'PASS' if ok else 'FAIL'}  {k}: {names[k]}" for k, ok in report.acceptance.items()]
     lines.append("passed" if report.passed else "FAILED")

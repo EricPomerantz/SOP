@@ -33,6 +33,8 @@ class StepSpec(_Model):
     text: str
     label: str | None = None
     evidence: dict[str, Literal["installed", "empty"]] = {}
+    # The step's last action isn't visible (e.g. a latch): evidence only counts once hands have left the part.
+    hands_off: bool = False
 
 
 class DetectorSpec(_Model):
@@ -45,6 +47,7 @@ class DecisionSpec(_Model):
     accept_confidence: float = 0.8
     hold_seconds: float = 1.0
     evidence_only_after: float = 3.0
+    hands_off_seconds: float = 0.5
 
 
 class SopConfig(_Model):

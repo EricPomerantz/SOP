@@ -13,6 +13,7 @@ class SlotView:
     state: SlotState
     conf: float | None = None
     last: Observed | None = None
+    touched: bool = False  # a hand overlaps the part (or hides the slot)
 
     def effective(self) -> Observed | None:
         """What the slot holds: the observed state, or the last observed one while hidden."""

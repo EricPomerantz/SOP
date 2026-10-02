@@ -69,3 +69,15 @@ def test_defined_scenarios_match_the_spec():
         {"kind": "sop_incomplete", "missing": ["fan_5", "fan_6", "psu_1", "psu_2", "cover"]}]
     assert by_name["fan_removed"].positions == [1, 2, 3, 4, 4] and by_name["fan_removed"].reverse_last
     assert {"kind": "part_removed", "step_id": "fan_3"} in by_name["fan_removed"].expected_alerts
+
+
+def test_hold_before_reverse_keeps_the_part_in_place(tmp_path):
+    run = tiny_run(tmp_path, clips=[5, 5])
+    spec = ScenarioSpec("z", [1, 2, 2], True, [], hold_before_reverse=0.3)
+    levels = read_levels(render_scenario(run, spec, tmp_path / "out", freeze_seconds=0))
+    assert levels == list(range(10)) + [9, 9, 9] + [9, 8, 7, 6, 5]
+
+
+def test_fan_removed_holds_long_enough_to_count_as_done():
+    fan_removed = next(s for s in SCENARIOS if s.name == "fan_removed")
+    assert fan_removed.hold_before_reverse >= 3.0

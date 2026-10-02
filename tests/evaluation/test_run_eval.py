@@ -18,19 +18,19 @@ def test_video_from_result_scores_steps_and_off_sop():
         steps=[StepState("fan_2", "done", 15.2, 21.4, 6.2, "evidence"), StepState("fan_1", "done", 5.5, 15.9, 10.4, "jev")],
         alerts=[Alert(3.0, "warning", "off_sop", "Off-SOP activity"),
                 Alert(22.5, "violation", "sop_incomplete", "SOP incomplete: missing cover", data={"missing": ["cover"]})],
-        latencies_ms=[100.0, 200.0, 300.0])
+        latencies_ms=[100.0, 200.0, 300.0], decisions=[(0.5, "idle"), (12.0, "fan_1"), (22.0, "fan_3")])
     v = video_from_result("test:Install_12", "test", res, run12(), [])
     assert v.step_order == ["fan_1", "fan_2"]
     assert v.steps["fan_1"] == {"status": "done", "done_t": 15.9, "error": 0.9, "source": "jev"}
     assert round(v.steps["fan_2"]["error"], 3) == 0.4
-    assert v.offsop == [True, False]
+    assert v.offsop == [True, False]  # Jev named fan_3 during the closing off-SOP segment
     assert v.alerts[1]["data"] == {"missing": ["cover"]}
     assert v.frames[1] == {"t": 0.033, "slots": {"fan_bay_1": "installed"}}
     assert v.latency_ms == {"p50": 200.0, "p90": 300.0, "max": 300.0}
 
 
 def test_scenario_video_has_no_ground_truth():
-    res = LockstepResult([], [StepState("fan_1", "pending", None, None, None, None)], [], [])
+    res = LockstepResult([], [StepState("fan_1", "pending", None, None, None, None)], [], [], [])
     v = video_from_result("scenario:fan_removed", "scenario", res, None, [{"kind": "part_removed", "step_id": "fan_3"}])
     assert v.offsop == [] and v.steps["fan_1"]["error"] is None and v.expected_alerts[0]["kind"] == "part_removed"
 

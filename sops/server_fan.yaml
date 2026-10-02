@@ -65,6 +65,7 @@ steps:
     label: Cover
     text: Place the cover on top of the server and press the black latch to lock it.
     evidence: {cover: installed}
+    hands_off: true                # latching happens after the cover is visibly in place
 
 order: strict                      # strict | any | groups
 # groups: [[fan_1, fan_2, fan_3, fan_4, fan_5, fan_6], [psu_1, psu_2], [cover]]   # when order: groups
@@ -75,4 +76,5 @@ idle: No one is working on the server
 decisions:
   accept_confidence: 0.8           # Jev confidence/probability needed to act
   hold_seconds: 1.0                # how long a judgment must persist
-  evidence_only_after: 3.0         # mark done on evidence alone if Jev hasn't confirmed by then
+  evidence_only_after: 1.0         # mark done on evidence alone if Jev hasn't confirmed by then (eval-tuned from 3.0)
+  hands_off_seconds: 0.5           # hands_off steps: part in place and untouched this long
