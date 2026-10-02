@@ -102,6 +102,13 @@ def doctor() -> None:
 
 
 @app.command("make-scenarios")
-def make_scenarios() -> None:
+def make_scenarios(run: int = typer.Option(12, help="Recording to build the scenarios from"),
+                   out: Path = typer.Option(Path("data/scenarios"), help="Output folder")) -> None:
     """Render the simulated-mistake scenario videos."""
-    _not_implemented()
+    from sopvision.dataset import load_index
+    from sopvision.evaluation.scenarios import SCENARIOS, render_scenario
+    from sopvision.settings import Settings
+
+    index = {r.run: r for r in load_index(Settings().sop_data_root)}[run]
+    for spec in SCENARIOS:
+        typer.echo(f"wrote {render_scenario(index, spec, out)}")
