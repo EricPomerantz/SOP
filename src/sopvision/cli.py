@@ -7,11 +7,6 @@ import typer
 app = typer.Typer(help="Live SOP monitoring with object detection and Jev.", no_args_is_help=True)
 
 
-def _not_implemented() -> None:
-    typer.echo("Not implemented yet")
-    raise typer.Exit(2)
-
-
 @app.command()
 def serve(host: str = typer.Option("127.0.0.1", help="Interface to listen on"),
           port: int = typer.Option(8000, help="Port")) -> None:
@@ -72,15 +67,44 @@ def calibrate(
 
 
 @app.command("eval")
-def eval_cmd() -> None:
+def eval_cmd(out: Path = typer.Option(Path("runs/eval-native.json"), help="Where to write the eval report")) -> None:
     """Replay test and scenario videos and check the acceptance criteria."""
-    _not_implemented()
+    from sopvision.config import ConfigError
+    from sopvision.doctor import GpuUnavailableError, gpu_report, in_container
+    from sopvision.evaluation.run_eval import run_eval, summary_lines
+    from sopvision.server.runs import startup_checks
+    from sopvision.settings import Settings
+
+    settings, gpu = Settings(), gpu_report()
+    try:
+        sops = startup_checks(settings, gpu)
+    except (ConfigError, GpuUnavailableError) as e:
+        typer.echo(str(e), err=True)
+        raise typer.Exit(1)
+    env = {"in_container": in_container(), "gpu": gpu.device_name, "torch": gpu.torch_version, "sop": sops[0].sop}
+    report = run_eval(settings, sops[0], out, env, progress=typer.echo)
+    for line in summary_lines(report):
+        typer.echo(line)
+    typer.echo(f"report: {out}")
+    if not report.passed:
+        raise typer.Exit(1)
 
 
 @app.command()
-def compare() -> None:
+def compare(first: Path = typer.Argument(..., help="Eval report, e.g. runs/eval-native.json"),
+            second: Path = typer.Argument(..., help="Eval report, e.g. runs/eval-docker.json")) -> None:
     """Compare a native and a Docker eval report."""
-    _not_implemented()
+    from sopvision.evaluation.compare import compare_reports
+    from sopvision.evaluation.metrics import EvalReport
+
+    a = EvalReport.model_validate_json(first.read_text(encoding="utf-8"))
+    b = EvalReport.model_validate_json(second.read_text(encoding="utf-8"))
+    problems = compare_reports(a, b)
+    for p in problems:
+        typer.echo(p)
+    if problems:
+        raise typer.Exit(1)
+    typer.echo("parity: OK")
 
 
 @app.command()
