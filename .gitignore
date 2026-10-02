@@ -1,0 +1,21 @@
+# Dataset (5.5 GB extracted + 5.8 GB archive) — referenced by path, never committed
+sop-sample-training-data/
+*.tar.gz
+
+# Generated artifacts
+models/
+runs/
+data/
+
+# Secrets
+.env
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Frontend
+node_modules/
+web/dist/
