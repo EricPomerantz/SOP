@@ -53,5 +53,5 @@ markers = [
     "slow: long-running",
     "dataset: needs the server_fan dataset",
 ]
-addopts = "-m 'not gpu and not jev'"
+addopts = "-m 'not gpu and not jev' --import-mode=importlib"
 pythonpath = ["."]
