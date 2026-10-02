@@ -1,0 +1,35 @@
+{
+  "model": "jev-1.13.0",
+  "usage": {
+    "input_tokens": 1068,
+    "output_tokens": 153
+  },
+  "answers": {
+    "current_step": {
+      "type": "choice",
+      "choice": "fan_3",
+      "confidence": 0.99,
+      "probabilities": {
+        "fan_1": 0.0,
+        "fan_2": 0.0,
+        "fan_3": 0.99,
+        "fan_4": 0.01,
+        "fan_5": 0.0,
+        "fan_6": 0.0,
+        "psu_1": 0.0,
+        "psu_2": 0.0,
+        "cover": 0.0,
+        "idle": 0.0,
+        "off_sop": 0.0
+      }
+    },
+    "active_step_done": {
+      "type": "noul",
+      "noul": 0.17
+    },
+    "anomaly": {
+      "type": "noul",
+      "noul": 0.42
+    }
+  }
+}
