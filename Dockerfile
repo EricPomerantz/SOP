@@ -1,5 +1,14 @@
 # SOP Vision runtime image: `sopvision serve` / `sopvision eval` with an NVIDIA GPU.
 # Same uv.lock as the native run, so package versions match exactly.
+
+# Dashboard build stage
+FROM node:24-slim AS web
+WORKDIR /web
+COPY web/package.json web/package-lock.json ./
+RUN npm ci
+COPY web/ ./
+RUN npm run build
+
 FROM python:3.12-slim-bookworm
 
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
@@ -22,6 +31,7 @@ COPY src/ src/
 RUN uv sync --frozen --no-dev
 # Baked-in defaults; docker-compose.yml mounts ./sops over this so edits apply without a rebuild.
 COPY sops/ sops/
+COPY --from=web /web/dist web/dist
 
 ENV PATH=/app/.venv/bin:$PATH
 EXPOSE 8000

@@ -19,6 +19,7 @@ class DecisionMsg(BaseModel):
     active_step_id: str
     active_step_done: float
     anomaly: float
+    off_sop: float  # Jev's probability that the current activity is off-SOP
     latency_ms: float
 
 

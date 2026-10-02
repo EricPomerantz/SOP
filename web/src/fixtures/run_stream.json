@@ -1,0 +1,8 @@
+[
+  {"type": "scene", "t": 1.0, "scene": {"version": 30, "t": 1.0, "chassis": {"visible": true, "conf": 0.98}, "slots": {}, "hands": [], "held": []}},
+  {"type": "step_update", "t": 2.0, "step_id": "fan_1", "status": "active", "source": null, "duration": null},
+  {"type": "decision", "t": 2.5, "current_step": "fan_1", "confidence": 0.93, "active_step_id": "fan_1", "active_step_done": 0.12, "anomaly": 0.05, "off_sop": 0.02, "latency_ms": 168},
+  {"type": "step_update", "t": 9.1, "step_id": "fan_1", "status": "done", "source": "jev", "duration": 7.1},
+  {"type": "decision", "t": 9.5, "current_step": "fan_2", "confidence": 0.91, "active_step_id": "fan_2", "active_step_done": 0.08, "anomaly": 0.04, "off_sop": 0.03, "latency_ms": 152},
+  {"type": "alert", "t": 10.0, "level": "warning", "kind": "off_sop", "message": "Off-SOP activity", "step_id": null}
+]

@@ -116,7 +116,8 @@ class RunCore:
         self._log(d.t_request, "decision", {"version": d.version, "active_step_id": d.active_step_id} | asdict(a))
         self.broadcast(to_ws(DecisionMsg(t=d.t_request, current_step=a.current_step, confidence=a.current_confidence,
                                          active_step_id=d.active_step_id, active_step_done=a.active_step_done,
-                                         anomaly=a.anomaly, latency_ms=a.latency_ms)))
+                                         anomaly=a.anomaly, off_sop=a.current_probabilities.get("off_sop", 0.0),
+                                         latency_ms=a.latency_ms)))
         self.emit(self.tracker.on_decision(d, self.last_scene))
 
     def on_status(self, status: str, t: float) -> None:
