@@ -57,3 +57,30 @@ class FakeCapture:
 
     def release(self) -> None:
         self.released = True
+
+
+# --- scene builders (Tasks 11–12) ---
+import math
+
+from sopvision.perception.detector import Detection
+
+CHASSIS = (100.0, 100.0, 1100.0, 600.0)  # 1000 x 500 px
+
+
+def det_at(cls: str, u: float, v: float, size: float = 40, conf: float = 0.9, chassis=CHASSIS, w: float | None = None,
+           h: float | None = None) -> Detection:
+    """A detection centred at chassis-normalised (u, v)."""
+    x1, y1, x2, y2 = chassis
+    cx, cy = x1 + u * (x2 - x1), y1 + v * (y2 - y1)
+    w, h = w or size, h or size
+    return Detection(cls, (cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2), conf, None)
+
+
+def rotate(uv, deg: float, chassis=CHASSIS):
+    """Rotate a normalised point about the chassis centre by `deg`, in pixel space."""
+    x1, y1, x2, y2 = chassis
+    w, h = x2 - x1, y2 - y1
+    px, py = (uv[0] - 0.5) * w, (uv[1] - 0.5) * h
+    a = math.radians(deg)
+    rx, ry = px * math.cos(a) - py * math.sin(a), px * math.sin(a) + py * math.cos(a)
+    return (0.5 + rx / w, 0.5 + ry / h)
