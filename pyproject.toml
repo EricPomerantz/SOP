@@ -19,6 +19,7 @@ dependencies = [
     "uvicorn[standard]",
     "httpx",
     "typesafe-sdk",
+    "lap>=0.5.12",
 ]
 
 [project.scripts]
