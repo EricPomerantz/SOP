@@ -55,3 +55,23 @@ Known gap: parts held in a hand (fan/PSU not yet in a bay) are not labelled, so 
 ## Live pipeline throughput (Task 18)
 
 - `spikes/bench_pipeline.py` (LiveRun on raw Install_12, real Jev, 30 s after a 3 s warm-up): **29.8 fps processed** against the 30 fps source (93 frames dropped, mostly during CUDA warm-up); 32 Jev decisions, median 186 ms; fan_1 and fan_2 completed live. YOLO26m is fast enough — no need for the `s` size.
+
+## Acceptance (Task 22) — all criteria pass
+
+Eval #1 (before fixes): c1 ✓, c4 ✓; c2 ✗ (median 3.04 s, max 10.48 s), c3 ✗, c5 ✗. Root causes and fixes (details in the build ledger):
+- Detection was accurate; confirmation was late — Jev's "done" for a just-installed part sits at 0.76–0.83, around the 0.8 threshold, so the 3 s visual timer won. Timer tuned to 1 s.
+- The cover's latching happens after it is visibly in place (13 s in Install_12): the cover is now a `hands_off` step — it completes once hands leave it.
+- The fan-removed scenario reversed the clip so early the fan sat in its bay < 0.5 s; it now holds 3 s first.
+- Criterion 3 redefined with the user: the dataset's off-SOP segments are an empty bench; "handled" = no step progress and Jev answers idle/off-SOP.
+
+| Criterion | Native | Docker |
+|---|---|---|
+| c1 all 18 steps done, in order | ✓ | ✓ |
+| c2 step timing (median ≤ 2 s, max ≤ 4 s) | ✓ median 1.13 s, max 1.44 s | ✓ same |
+| c3 off-SOP segments handled | ✓ 4/4 | ✓ 4/4 |
+| c4 no violations on clean runs | ✓ | ✓ |
+| c5 scenarios raise expected alerts | ✓ part_removed + sop_incomplete | ✓ |
+| c6 dashboard ≥ 20 fps | ✓ MJPEG 23.5 fps (pipeline 29.8 fps) | — |
+| c7 Docker parity | ✓ `sopvision compare` → parity: OK | |
+
+Jev latency p50 ≈ 180–195 ms. MJPEG fix: asyncio sleeps round up to ~15.4 ms on Windows, so a polled/paced stream ran at 14.9 fps; the frame buffer now wakes viewers on each new frame.

@@ -1,7 +1,6 @@
 """FastAPI app: SOPs and sources, run control, MJPEG video, WebSocket status, built dashboard (spec §9.1)."""
 
 import asyncio
-import time
 from dataclasses import asdict
 from pathlib import Path
 from typing import Literal
@@ -17,7 +16,6 @@ from sopvision.sources.base import SourceUnavailableError
 from sopvision.sources.registry import list_sources
 from sopvision.storage.report import report_csv
 
-MJPEG_INTERVAL = 0.05  # ~20 fps
 WEB_DIST = Path("web/dist")
 
 
@@ -93,12 +91,10 @@ def create_app(settings: Settings, manager: RunManager) -> FastAPI:
     async def video():
         async def frames():
             seq = 0
-            while True:
-                start = time.perf_counter()
+            while True:  # every new annotated frame, as it arrives (the pipeline sets the pace, ~30 fps)
                 seq, jpeg = await manager.frames.next(seq)
                 yield (b"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: " + str(len(jpeg)).encode()
                        + b"\r\n\r\n" + jpeg + b"\r\n")
-                await asyncio.sleep(max(0.0, MJPEG_INTERVAL - (time.perf_counter() - start)))
 
         return StreamingResponse(frames(), media_type="multipart/x-mixed-replace; boundary=frame")
 
