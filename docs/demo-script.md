@@ -7,9 +7,8 @@
 1. Pick **Install_12 (test run)** and press **Start**. This recording was never used for training.
 2. While the operator works, point out:
    - **Video:** the dashed chassis box and the dot on every bay — green installed, grey empty, amber when a hand covers it.
-   - **Checklist:** each step turns blue while active (with Jev's confidence) and ticks off with its duration.
+   - **Checklist:** a step turns blue when Jev names it as the one under way (with Jev's confidence), and ticks off with its duration once the part is visibly in place.
    - **Jev now:** which step Jev thinks is happening, how sure it is, and how fast it answered (~150–250 ms).
-   - **Event log:** the off-SOP activity at the very start is flagged on its own.
 3. Use **2×** to move faster if needed. At the end, every step is ticked and the status stays **On track**.
 
 ## 2. A part taken back out (1 min)
@@ -31,7 +30,8 @@ Press **Download run report** — a CSV with every step's completion time, durat
 
 - **Video never leaves the machine.** Only a small JSON description of the scene goes to Jev (~1,000 tokens a call).
 - **Cost:** Jev input is $0.042 per million tokens and output is free — well under $0.001 per station-hour.
-- **Belt and braces:** a step only counts as done when Jev says so *and* the part is visibly in place; if Jev is unreachable the tracker falls back to visual evidence alone.
+- **Who does what:** Jev reads the scene description, names the step under way, and watches for off-SOP activity and anomalies. A step is ticked off once its part is visibly in place, so the checklist keeps working even if Jev is unreachable.
+- **Don't overclaim:** on this footage every step was ticked off by visual evidence, not by Jev. The off-SOP stretches are an empty bench, so you'll see no off-SOP warning. Present Jev as "knows which step is happening", not "confirms each step" or "flags off-SOP work". Those still need footage that shows them.
 - **New equipment = new config.** An SOP is a YAML file; the detector is retrained from three reference frames boxed once (~10 minutes of someone's time).
 - **Wrong order and skipped steps** are caught too (see `uv run pytest -m jev`); this footage only contains correct runs, so they're shown with scripted scenes.
 - **Production path:** the same Docker image runs on an on-prem Linux GPU server; RTSP cameras plug in through `.env`.

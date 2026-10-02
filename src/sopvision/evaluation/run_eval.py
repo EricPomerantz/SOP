@@ -9,7 +9,8 @@ from typing import Literal
 
 from sopvision.config import SopConfig
 from sopvision.dataset import RunIndex, load_index
-from sopvision.evaluation.metrics import EvalReport, EvalVideo, check_acceptance, offsop_clean, step_errors
+from sopvision.evaluation.metrics import (EvalReport, EvalVideo, check_acceptance, offsop_clean, offsop_jev_answers,
+                                         step_errors)
 from sopvision.pipeline import LockstepResult, run_lockstep
 from sopvision.settings import Settings
 from sopvision.sources.file import FileSource
@@ -34,6 +35,7 @@ def video_from_result(vid: str, kind: Literal["test", "scenario"], res: Lockstep
         id=vid, kind=kind, step_order=order, steps=steps, alerts=[asdict(a) for a in res.alerts],
         frames=[{"t": round(f.t, 3), "slots": f.slots} for f in res.frames],
         offsop=offsop_clean(run.segments, res.steps, res.decisions) if run else [],
+        offsop_jev_answers=offsop_jev_answers(run.segments, res.decisions) if run else [],
         latency_ms=latency_stats(res.latencies_ms), expected_alerts=expected)
 
 
@@ -80,6 +82,13 @@ def summary_lines(report: EvalReport) -> list[str]:
     errors = [abs(s["error"]) for v in tests for s in v.steps.values() if s["error"] is not None]
     lines = [f"{v.id}: {sum(s['status'] == 'done' for s in v.steps.values())}/{len(v.steps)} steps, "
              f"alerts {sorted({a['kind'] for a in v.alerts})}, Jev p50 {v.latency_ms['p50']:.0f} ms" for v in report.videos]
+    sources = [s["source"] for v in tests for s in v.steps.values() if s["status"] == "done"]
+    lines.append(f"test-run completions: visual evidence {sources.count('evidence')}, Jev {sources.count('jev')}")
+    answers = [n for v in tests for n in v.offsop_jev_answers]
+    lines.append(f"off-SOP windows: {len(answers)}; Jev answers judged per window: {answers}")
+    if silent := answers.count(0):
+        lines.append(f"note: Jev gave no answer to judge in {silent} of {len(answers)} off-SOP windows; "
+                     "c3's Jev check is vacuous there")
     if errors:
         lines.append(f"step timing error: median {sorted(errors)[len(errors) // 2]:.2f} s, max {max(errors):.2f} s")
     names = {"c1": "all steps done in order", "c2": "timing within 2 s median / 4 s max", "c3": "off-SOP segments: idle/off-SOP, no step progress",

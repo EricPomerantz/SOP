@@ -68,10 +68,20 @@ Eval #1 (before fixes): c1 ✓, c4 ✓; c2 ✗ (median 3.04 s, max 10.48 s), c3 
 |---|---|---|
 | c1 all 18 steps done, in order | ✓ | ✓ |
 | c2 step timing (median ≤ 2 s, max ≤ 4 s) | ✓ median 1.13 s, max 1.44 s | ✓ same |
-| c3 off-SOP segments handled | ✓ 4/4 | ✓ 4/4 |
+| c3 off-SOP segments handled | ✓ 4/4 (no step progress; 0 Jev answers to judge) | ✓ 4/4 |
 | c4 no violations on clean runs | ✓ | ✓ |
 | c5 scenarios raise expected alerts | ✓ part_removed + sop_incomplete | ✓ |
 | c6 dashboard ≥ 20 fps | ✓ MJPEG 23.5 fps (pipeline 29.8 fps) | — |
 | c7 Docker parity | ✓ `sopvision compare` → parity: OK | |
 
-Jev latency p50 ≈ 180–195 ms. MJPEG fix: asyncio sleeps round up to ~15.4 ms on Windows, so a polled/paced stream ran at 14.9 fps; the frame buffer now wakes viewers on each new frame.
+**Jev's actual role (final review C1).** Re-running the native eval with completion sources and per-window Jev counts (`runs/eval-native-c1.json`; same numbers, `compare` against the Docker report → parity: OK) showed:
+- `test-run completions: visual evidence 18, Jev 0`.
+- `off-SOP windows: 4; Jev answers judged per window: [0, 0, 0, 0]`.
+
+So:
+- Jev names the active step, and that is what it does in these results.
+- Steps complete on the 1 s visual check.
+- c3 passes on "no step progress" alone; its Jev half had nothing to judge.
+- **Off-SOP and anomaly alerting by real Jev is unverified.** It's covered only by tracker unit tests with scripted answers, and needs footage with real off-SOP work. Giving Jev a real role in step completion (for example a lower `accept_confidence` for "done", or a longer visual timer) is a design decision for the user.
+
+Jev latency p50 ≈ 170–195 ms. MJPEG fix: asyncio sleeps round up to ~15.4 ms on Windows, so a polled/paced stream ran at 14.9 fps; the frame buffer now wakes viewers on each new frame.

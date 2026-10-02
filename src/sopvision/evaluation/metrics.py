@@ -22,6 +22,7 @@ class EvalVideo(BaseModel):
     alerts: list[dict]
     frames: list[dict]  # [{t, slots: {slot: state}}] — every frame, for Docker parity
     offsop: list[bool]  # per ground-truth off-SOP segment: handled cleanly (see offsop_clean)?
+    offsop_jev_answers: list[int] = []  # per off-SOP segment: Jev answers offsop_clean judged (0 → its Jev check is vacuous)
     latency_ms: dict[str, float]
     expected_alerts: list[dict] = []  # scenario videos: what they must raise
 
@@ -54,9 +55,19 @@ def offsop_clean(segments: list[Segment], steps: list[StepState], decisions: lis
             continue
         no_progress = all(s.id == previous or s.status != "done" or s.done_t is None or not seg.start <= s.done_t <= seg.end
                           for s in steps)
-        jev_ok = all(answer in ("idle", "off_sop") for t, answer in decisions if seg.start + grace <= t <= seg.end)
+        jev_ok = all(answer in ("idle", "off_sop") for answer in _judged(seg, decisions, grace))
         results.append(no_progress and jev_ok)
     return results
+
+
+def _judged(seg: Segment, decisions: list[tuple[float, str]], grace: float) -> list[str]:
+    return [answer for t, answer in decisions if seg.start + grace <= t <= seg.end]
+
+
+def offsop_jev_answers(segments: list[Segment], decisions: list[tuple[float, str]],
+                       grace: float = BOUNDARY_GRACE) -> list[int]:
+    """Per ground-truth off-SOP segment, how many Jev answers criterion 3 actually judged."""
+    return [len(_judged(seg, decisions, grace)) for seg in segments if seg.step_id == "off_sop"]
 
 
 def _has(alerts: list[dict], expected: dict) -> bool:

@@ -2,7 +2,8 @@ import pytest
 
 from sopvision.dataset import Segment
 from sopvision.evaluation.compare import compare_reports
-from sopvision.evaluation.metrics import EvalReport, EvalVideo, check_acceptance, offsop_clean, step_errors
+from sopvision.evaluation.metrics import (EvalReport, EvalVideo, check_acceptance, offsop_clean, offsop_jev_answers,
+                                         step_errors)
 from sopvision.sop.types import Alert, StepState
 
 STEPS = ["fan_1", "fan_2", "fan_3", "fan_4", "fan_5", "fan_6", "psu_1", "psu_2", "cover"]
@@ -37,6 +38,12 @@ def test_offsop_not_clean_when_jev_names_a_step():
 def test_offsop_not_clean_when_another_step_completes():
     assert offsop_clean(SEGS, [done("fan_1", 22.0), done("fan_2", 21.5)], []) == [True, False]
 
+
+
+def test_offsop_jev_answers_counts_only_what_c3_judges():
+    # 0.5 s falls in the first segment's 1 s grace and 21.3 s in the second's, so neither is judged
+    decisions = [(0.5, "idle"), (1.5, "idle"), (3.0, "off_sop"), (10.0, "fan_1"), (21.3, "fan_2")]
+    assert offsop_jev_answers(SEGS, decisions) == [2, 0]
 
 def video(vid="test:Install_12", kind="test", shift=0.0, kinds=("off_sop",), corrupt=0.0, done=STEPS, extra=None):
     steps = {s: {"status": "done" if s in done else "pending", "done_t": 10.0 + i + (shift if s == "fan_2" else 0) if s in done else None,

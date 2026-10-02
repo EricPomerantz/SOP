@@ -1,6 +1,6 @@
 # SOP Vision
 
-Live SOP monitoring: a custom YOLO detector turns camera frames into a JSON scene state ("fan bay 3: installed, hand near PSU bay 1"), **Jev** (TypeSafe AI's System One decision model) decides which SOP step is happening and whether it's done, and a web dashboard shows the live checklist, Jev's judgment, a timeline and alerts. The first SOP is a server fan / power-supply / cover install.
+Live SOP monitoring: a custom YOLO detector turns camera frames into a JSON scene state ("fan bay 3: installed, hand near PSU bay 1"). **Jev** (TypeSafe AI's System One decision model) reads that state, names the SOP step under way, and can raise off-SOP and anomaly warnings. A step is ticked off once its part is visibly in place: either Jev holds "done" while the part is visible, or the part stays visible for 1 s. On the test footage the 1 s visual check always got there first (see Results). A web dashboard shows the live checklist, Jev's judgment, a timeline and alerts. The first SOP is a server fan / power-supply / cover install.
 
 - Design: [docs/superpowers/specs/2026-10-01-sop-vision-design.md](docs/superpowers/specs/2026-10-01-sop-vision-design.md)
 - Build plan: [docs/superpowers/plans/2026-10-01-sop-vision-phase1.md](docs/superpowers/plans/2026-10-01-sop-vision-phase1.md)
@@ -15,13 +15,21 @@ Evaluated on the two held-out recordings (Install_12, Install_13) and two simula
 |---|---|
 | All 18 steps detected, in order | ✓ 18/18 |
 | Step completion timing | ✓ median 1.13 s, worst 1.44 s after the true step boundary |
-| Off-SOP segments handled (no step progress, Jev says idle/off-SOP) | ✓ 4/4 |
+| Off-SOP segments handled (no step progress; any Jev answer is idle/off-SOP) | ✓ 4/4 (Jev answered 0 times in them; see below) |
 | No false violations on clean runs | ✓ |
 | Simulated mistakes raise their alerts | ✓ part removed · SOP incomplete |
 | Dashboard video ≥ 20 fps | ✓ 23.5 fps (pipeline 29.8 fps on an RTX 4080) |
 | Docker gives the same results as native | ✓ `sopvision compare` → parity: OK |
 
-Detector (YOLO26m): mAP50 0.994, mAP50-95 0.975 on the validation recording. Jev answers in ~180–195 ms (median).
+Detector (YOLO26m): mAP50 0.994, mAP50-95 0.975 on the validation recording. Jev answers in ~170–195 ms (median).
+
+**What Jev did in these results:**
+- **Step confirmation:** all 18 test-run steps were ticked off by visual evidence and none by Jev. For a just-placed part, Jev's "done" confidence sits around the 0.8 threshold, so the 1 s visual check gets there first.
+- **Step tracking:** Jev's real job here is naming the step under way, which drives the active step on the dashboard.
+- **Off-SOP stretches:** in the test recordings these are an empty bench with nothing changing, so Jev wasn't asked anything during them (0 answers in each of the 4 windows). Criterion 3 passes on "no step progressed" alone.
+- **Unverified:** the off-SOP and anomaly warnings work in unit tests with scripted Jev answers, but haven't been tested with real Jev on real footage. That needs a recording with off-SOP work in it.
+
+`sopvision eval` prints these counts with every run (`test-run completions: …`, `off-SOP windows: …`).
 
 ## Prerequisites
 
