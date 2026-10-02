@@ -19,11 +19,11 @@ def summarize_metrics(results_dict: dict) -> dict:
             "map50_95": round(float(results_dict["metrics/mAP50-95(B)"]), 4)}
 
 
-def train(data: Path, model: str, imgsz: int, epochs: int, out: Path, batch: int,
+def train(data: Path, model: str, imgsz: int, epochs: int, out: Path, batch: int, workers: int = 2,
           project: Path = Path("data/ultralytics")) -> dict:
     from ultralytics import YOLO
 
-    result = YOLO(model).train(data=str(data), imgsz=imgsz, epochs=epochs, batch=batch, project=str(project.resolve()),
+    result = YOLO(model).train(data=str(data), imgsz=imgsz, epochs=epochs, batch=batch, workers=workers, project=str(project.resolve()),
                                name=out.name, exist_ok=True, patience=30, seed=0, verbose=False)
     out.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(Path(result.save_dir) / "weights" / "best.pt", out / "best.pt")
@@ -60,7 +60,8 @@ def main() -> None:
     t.add_argument("--model", default="yolo26m.pt")
     t.add_argument("--imgsz", type=int, default=1280)
     t.add_argument("--epochs", type=int, default=100)
-    t.add_argument("--batch", type=int, default=8)
+    t.add_argument("--batch", type=int, default=4)  # 8 at imgsz 1280 fills a 16 GB GPU and thrashes on Windows
+    t.add_argument("--workers", type=int, default=2)
     t.add_argument("--out", type=Path, default=Path("models/server_fan"))
     b = sub.add_parser("bench")
     b.add_argument("--weights", type=Path, default=Path("models/server_fan/best.pt"))
@@ -69,7 +70,7 @@ def main() -> None:
     b.add_argument("--imgsz", type=int, default=1280)
     args = parser.parse_args()
     if args.cmd == "train":
-        print(json.dumps(train(args.data, args.model, args.imgsz, args.epochs, args.out, args.batch), indent=2))
+        print(json.dumps(train(args.data, args.model, args.imgsz, args.epochs, args.out, args.batch, args.workers), indent=2))
     else:
         print(f"{bench(args.weights, args.video, args.frames, args.imgsz):.1f} fps (detect + track, imgsz {args.imgsz})")
 

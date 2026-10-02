@@ -402,6 +402,28 @@ def generate(ref_json: Path, frames: Path, out: Path, classes: list[str]) -> Non
     print("slot centres:", ref.slot_centers())
 
 
+def write_slots(ref_json: Path, sop_path: Path, check_run: int, check_out: Path) -> None:
+    """Slot centres from the reference → SOP layout; then draw them on a frame of another (rotated) run."""
+    from sopvision.calibrate import calibration_targets, draw_layout_check, write_layout
+    from sopvision.config import load_sop
+
+    settings = Settings()
+    ref = Reference(ref_json, settings.sop_data_root)
+    coords = ref.slot_centers()
+    write_layout(sop_path, coords)
+    print("wrote", sop_path, coords)
+    sop = load_sop(sop_path)
+    run = {r.run: r for r in load_index(settings.sop_data_root)}[check_run]
+    target = next(c for c in calibration_targets(sop, run) if c.slot == "psu_bay_1")  # fans + one PSU in place
+    frame = read_frame(run.raw_path, target.t)
+    h, inliers = ref.align(frame)
+    if h is None:
+        raise RuntimeError(f"can't align Install_{check_run} for the check ({inliers} inliers)")
+    check_out.parent.mkdir(parents=True, exist_ok=True)
+    cv2.imwrite(str(check_out), draw_layout_check(frame, transform_box(ref.chassis, h), sop))
+    print("check image:", check_out)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -409,6 +431,11 @@ def main() -> None:
     d.add_argument("--run", type=int, default=4)
     d.add_argument("--out", type=Path, default=Path("data/reference"))
     d.add_argument("--only", help="comma-separated classes to redraw, keeping the rest")
+    sl = sub.add_parser("slots", help="write slot centres from the reference into the SOP YAML, then draw a check")
+    sl.add_argument("--reference", type=Path, default=Path("data/reference/Install_4.json"))
+    sl.add_argument("--sop", type=Path, default=Path("sops/server_fan.yaml"))
+    sl.add_argument("--check-run", type=int, default=9)
+    sl.add_argument("--check-out", type=Path, default=Path("data/calibrate_check.jpg"))
     g = sub.add_parser("generate")
     g.add_argument("--reference", type=Path, default=Path("data/reference/Install_4.json"))
     g.add_argument("--frames", type=Path, default=Path("data/frames"))
@@ -417,6 +444,8 @@ def main() -> None:
     args = parser.parse_args()
     if args.cmd == "draw":
         print("saved", draw(args.run, args.out, set(args.only.split(",")) if args.only else None))
+    elif args.cmd == "slots":
+        write_slots(args.reference, args.sop, args.check_run, args.check_out)
     else:
         from sopvision.config import load_sop
 

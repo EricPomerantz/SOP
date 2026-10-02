@@ -17,16 +17,16 @@ detector:
 layout:
   anchor: chassis                  # slot coords are normalised (0–1) within the chassis box
   match_radius: 0.08               # max normalised distance for a detection to match a slot
-  slots:                           # placeholder centres; set for real with `sopvision calibrate`
-    fan_bay_1: {at: [0.47, 0.62], filled_by: fan, empty_as: fan_bay_empty}
-    fan_bay_2: {at: [0.47, 0.72], filled_by: fan, empty_as: fan_bay_empty}
-    fan_bay_3: {at: [0.47, 0.82], filled_by: fan, empty_as: fan_bay_empty}
-    fan_bay_4: {at: [0.47, 0.18], filled_by: fan, empty_as: fan_bay_empty}
-    fan_bay_5: {at: [0.47, 0.28], filled_by: fan, empty_as: fan_bay_empty}
-    fan_bay_6: {at: [0.47, 0.38], filled_by: fan, empty_as: fan_bay_empty}
-    psu_bay_1: {at: [0.12, 0.15], filled_by: psu, empty_as: psu_bay_empty}
-    psu_bay_2: {at: [0.12, 0.85], filled_by: psu, empty_as: psu_bay_empty}
-    cover:     {at: [0.50, 0.50], filled_by: cover, match_radius: 0.25}
+  slots:                           # centres from the reference boxes: python -m training.reference_labels slots
+    fan_bay_1: {at: [0.55, 0.851], filled_by: fan, empty_as: fan_bay_empty}
+    fan_bay_2: {at: [0.548, 0.743], filled_by: fan, empty_as: fan_bay_empty}
+    fan_bay_3: {at: [0.549, 0.641], filled_by: fan, empty_as: fan_bay_empty}
+    fan_bay_4: {at: [0.553, 0.363], filled_by: fan, empty_as: fan_bay_empty}
+    fan_bay_5: {at: [0.552, 0.257], filled_by: fan, empty_as: fan_bay_empty}
+    fan_bay_6: {at: [0.551, 0.158], filled_by: fan, empty_as: fan_bay_empty}
+    psu_bay_1: {at: [0.295, 0.142], filled_by: psu, empty_as: psu_bay_empty}
+    psu_bay_2: {at: [0.299, 0.856], filled_by: psu, empty_as: psu_bay_empty}
+    cover: {at: [0.401, 0.503], filled_by: cover, match_radius: 0.25}
 
 steps:
   - id: fan_1
