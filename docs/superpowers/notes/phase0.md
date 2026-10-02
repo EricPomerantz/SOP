@@ -51,3 +51,7 @@ Known gap: parts held in a hand (fan/PSU not yet in a bay) are not labelled, so 
 - YOLO26m (Ultralytics 8.4.171), imgsz 1280, batch 4 (batch 8 filled the 16 GB GPU and stalled), 2 workers; ~27–45 s/epoch on the RTX 4080.
 - Stopped at epoch 51 of 100 after a plateau (mAP50 ≈ 0.99 since epoch 17). Best epoch 48 on the Install_11 validation frames: **mAP50 0.994, mAP50-95 0.975**. Optimizer stripped: `models/server_fan/best.pt` is 44 MB (gitignored).
 - `sopvision calibrate --run 9` with the trained detector: every slot centre lands on its bay on the rotated recording.
+
+## Live pipeline throughput (Task 18)
+
+- `spikes/bench_pipeline.py` (LiveRun on raw Install_12, real Jev, 30 s after a 3 s warm-up): **29.8 fps processed** against the 30 fps source (93 frames dropped, mostly during CUDA warm-up); 32 Jev decisions, median 186 ms; fan_1 and fan_2 completed live. YOLO26m is fast enough — no need for the `s` size.
