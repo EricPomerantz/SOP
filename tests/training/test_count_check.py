@@ -34,3 +34,9 @@ def test_hands_never_excuse_chassis_or_cover():
 
 def test_missing_class_counts_as_zero():
     assert not check({}, expected_counts(SEQ, 1), hands=0).ok
+
+
+def test_hands_relax_lower_bound_by_one_each_not_entirely():
+    e = expected_counts(SEQ, 4)  # fans 2–3
+    assert check({"fan": 0, "fan_bay_empty": 3, **FULL_BAYS}, e, hands=1).reasons == ["fan: 0 not in 2–3"]
+    assert check({"fan": 0, "fan_bay_empty": 3, **FULL_BAYS}, e, hands=2).ok

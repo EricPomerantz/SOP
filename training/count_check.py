@@ -12,6 +12,8 @@ FAN_BAYS = 6
 PSU_BAYS = 2
 HIDDEN_BY_COVER = ("fan", "fan_bay_empty", "psu", "psu_bay_empty")
 
+HIDDEN_BY_HANDS = HIDDEN_BY_COVER  # the same parts a hand can cover
+
 Range = tuple[int, int] | None
 
 
@@ -61,7 +63,8 @@ def check(counts: dict[str, int], expected: ExpectedCounts, hands: int) -> Check
             continue
         lo, hi = bounds
         n = counts.get(f.name, 0)
-        lower_applies = not (hands > 0 and f.name in HIDDEN_BY_COVER)  # a hand can hide parts, never add them
-        if n > hi or (lower_applies and n < lo):
+        # Each visible hand can hide about one part (never add one), so relax only the lower bound, one per hand.
+        floor = lo - hands if f.name in HIDDEN_BY_HANDS else lo
+        if n > hi or n < floor:
             reasons.append(f"{f.name}: {n} not in {lo}–{hi}")
     return CheckResult(ok=not reasons, reasons=reasons)
