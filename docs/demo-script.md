@@ -1,0 +1,37 @@
+# SOP Vision — 5-minute demo
+
+**Before you start:** `uv run sopvision serve`, open http://localhost:8000, make sure no run is in progress.
+
+## 1. A clean run (2 min)
+
+1. Pick **Install_12 (test run)** and press **Start**. This recording was never used for training.
+2. While the operator works, point out:
+   - **Video:** the dashed chassis box and the dot on every bay — green installed, grey empty, amber when a hand covers it.
+   - **Checklist:** each step turns blue while active (with Jev's confidence) and ticks off with its duration.
+   - **Jev now:** which step Jev thinks is happening, how sure it is, and how fast it answered (~150–250 ms).
+   - **Event log:** the off-SOP activity at the very start is flagged on its own.
+3. Use **2×** to move faster if needed. At the end, every step is ticked and the status stays **On track**.
+
+## 2. A part taken back out (1 min)
+
+1. Pick **Simulated: fan removed** and **Start**.
+2. Three fans go in, then the third comes back out (the clip plays backwards).
+3. The log shows **"fan_3: part removed after the step was completed"** and the status turns **Deviation**; Fan 3 returns to pending.
+
+## 3. An unfinished job (30 s)
+
+1. Pick **Simulated: incomplete run** and **Start**.
+2. When the video ends: **"SOP incomplete: missing fan_5, fan_6, psu_1, psu_2, cover"**, status **Incomplete**.
+
+## 4. The record (30 s)
+
+Press **Download run report** — a CSV with every step's completion time, duration and how it was confirmed (Jev or visual evidence), plus every alert.
+
+## Talking points
+
+- **Video never leaves the machine.** Only a small JSON description of the scene goes to Jev (~1,000 tokens a call).
+- **Cost:** Jev input is $0.042 per million tokens and output is free — well under $0.001 per station-hour.
+- **Belt and braces:** a step only counts as done when Jev says so *and* the part is visibly in place; if Jev is unreachable the tracker falls back to visual evidence alone.
+- **New equipment = new config.** An SOP is a YAML file; the detector is retrained from three reference frames boxed once (~10 minutes of someone's time).
+- **Wrong order and skipped steps** are caught too (see `uv run pytest -m jev`); this footage only contains correct runs, so they're shown with scripted scenes.
+- **Production path:** the same Docker image runs on an on-prem Linux GPU server; RTSP cameras plug in through `.env`.
