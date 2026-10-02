@@ -1,0 +1,13 @@
+# Keep the build context small (the dataset alone is ~11 GB) and secrets out of the image.
+sop-sample-training-data/
+*.tar.gz
+models/
+runs/
+data/
+.venv/
+**/node_modules/
+.env
+.git/
+web/dist/
+.superpowers/
+spikes/

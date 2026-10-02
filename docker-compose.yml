@@ -1,0 +1,23 @@
+services:
+  sopvision:
+    build: .
+    image: sopvision:latest
+    ports:
+      - "8000:8000"
+    env_file: .env
+    environment:
+      SOP_DATA_ROOT: /data/server_fan
+      SOPVISION_IN_CONTAINER: "1"
+    volumes:
+      - ${SOP_DATASET_DIR:-./sop-sample-training-data}:/data:ro
+      - ./models:/app/models:ro
+      - ./runs:/app/runs
+      - ./sops:/app/sops:ro
+      - ./data/scenarios:/app/data/scenarios:ro
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

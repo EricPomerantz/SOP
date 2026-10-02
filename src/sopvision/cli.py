@@ -37,7 +37,19 @@ def compare() -> None:
 @app.command()
 def doctor() -> None:
     """Report GPU and environment status."""
-    _not_implemented()
+    from sopvision.doctor import GpuUnavailableError, gpu_report, in_container, require_gpu
+
+    report = gpu_report()
+    container = in_container()
+    typer.echo(f"cuda: {report.cuda_available}")
+    typer.echo(f"gpu: {report.device_name}")
+    typer.echo(f"torch: {report.torch_version}")
+    typer.echo(f"in_container: {container}")
+    try:
+        require_gpu(container, report)
+    except GpuUnavailableError as e:
+        typer.echo(str(e), err=True)
+        raise typer.Exit(1)
 
 
 @app.command("make-scenarios")
