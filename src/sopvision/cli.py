@@ -13,9 +13,26 @@ def _not_implemented() -> None:
 
 
 @app.command()
-def serve() -> None:
+def serve(host: str = typer.Option("127.0.0.1", help="Interface to listen on"),
+          port: int = typer.Option(8000, help="Port")) -> None:
     """Run the dashboard server."""
-    _not_implemented()
+    import uvicorn
+
+    from sopvision.config import ConfigError
+    from sopvision.doctor import GpuUnavailableError, gpu_report
+    from sopvision.server.app import create_app
+    from sopvision.server.runs import RunManager, default_run_factory, startup_checks
+    from sopvision.settings import Settings
+
+    settings = Settings()
+    try:
+        sops = startup_checks(settings, gpu_report())
+    except (ConfigError, GpuUnavailableError) as e:
+        typer.echo(str(e), err=True)
+        raise typer.Exit(1)
+    manager = RunManager(settings, {s.sop: s for s in sops}, default_run_factory(settings))
+    typer.echo(f"SOP Vision on http://{'localhost' if host in ('0.0.0.0', '127.0.0.1') else host}:{port}")
+    uvicorn.run(create_app(settings, manager), host=host, port=port, log_level="warning")
 
 
 @app.command()

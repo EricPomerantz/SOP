@@ -1,0 +1,170 @@
+import asyncio
+import shutil
+from pathlib import Path
+
+import pytest
+import yaml
+from fastapi.testclient import TestClient
+from pydantic import SecretStr
+
+from sopvision.config import ConfigError
+from sopvision.doctor import GpuReport
+from sopvision.pipeline import RunCore
+from sopvision.server.app import create_app
+from sopvision.server.runs import RunManager, startup_checks
+from sopvision.settings import Settings
+from sopvision.sop.types import StepUpdate
+
+WEBCAM_IN_CONTAINER = "Webcam isn't available in the container — run natively or use an RTSP source."
+GPU = GpuReport(True, "NVIDIA GeForce RTX 4080", "x")
+
+
+class FakeRun:
+    """Behaves like LiveRun: logs through a real RunCore and emits a scripted step update on start."""
+
+    def __init__(self, ctx, spec):
+        self.ctx, self.spec = ctx, spec
+        self.core = RunCore(ctx.sop, ctx.run_id, spec.id, ctx.runlog, ctx.broadcast)
+        self.done = asyncio.Event()
+        self.paused = False
+
+    async def start(self):
+        self.statuses = {st.id: "pending" for st in self.ctx.sop.steps} | {"fan_1": "active"}
+        self.core.emit([StepUpdate(1.0, "fan_1", "active", None)])
+
+    async def stop(self):
+        if not self.done.is_set():
+            self.report = self.core.finish()
+            self.done.set()
+        return self.report
+
+    def snapshot(self):
+        return {"steps": [{"id": k, "status": v} for k, v in self.statuses.items()], "alerts": []}
+
+    def pause(self):
+        self.paused = True
+
+    def resume(self):
+        self.paused = False
+
+    def set_speed(self, speed):
+        pass
+
+
+def make_client(tmp_path, **overrides):
+    data_root = tmp_path / "data"
+    (data_root / "raw").mkdir(parents=True)
+    (data_root / "raw" / "Install_12.MP4").touch()
+    settings = Settings(sop_data_root=data_root, runs_dir=tmp_path / "runs", scenarios_dir=tmp_path / "scenarios",
+                        **overrides)
+    from sopvision.config import list_sops
+
+    manager = RunManager(settings, {s.sop: s for s in list_sops(Path("sops"))}, run_factory=FakeRun)
+    return TestClient(create_app(settings, manager))
+
+
+@pytest.fixture
+def client(tmp_path):
+    with make_client(tmp_path, sopvision_rtsp_urls=["rtsp://cam/1"]) as c:
+        yield c
+
+
+@pytest.fixture
+def client_in_container(tmp_path):
+    with make_client(tmp_path, sopvision_in_container=True) as c:
+        yield c
+
+
+def start(c, source="test:Install_12"):
+    return c.post("/runs", json={"sop": "server_fan_install", "source_id": source})
+
+
+def test_sops_list_steps_with_labels(client):
+    (sop,) = client.get("/sops").json()
+    assert sop["id"] == "server_fan_install" and sop["steps"][0] == {
+        "id": "fan_1", "label": "Fan 1", "text": "Install the first fan by connecting the connector, then pressing the fan in place."}
+
+
+def test_sources_hide_webcam_in_container(client_in_container):
+    sources = client_in_container.get("/sources").json()
+    assert sources and all(s["kind"] != "webcam" for s in sources)
+
+
+def test_webcam_rejected_in_container(client_in_container):
+    r = start(client_in_container, "webcam:0")
+    assert r.status_code == 400 and r.json()["detail"] == WEBCAM_IN_CONTAINER
+
+
+def test_unknown_source_is_404(client):
+    assert start(client, "test:Install_99").status_code == 404
+
+
+def test_one_run_at_a_time(client):
+    assert start(client).status_code == 201
+    r = start(client)
+    assert r.status_code == 409 and r.json()["detail"] == "A run is already in progress. Stop it first."
+
+
+def test_ws_streams_step_updates(client):
+    with client.websocket_connect("/ws") as ws:
+        run_id = start(client).json()["run_id"]
+        msg = ws.receive_json()
+        assert (msg["type"], msg["step_id"], msg["status"]) == ("step_update", "fan_1", "active")
+        client.post(f"/runs/{run_id}/stop")
+        kinds = [ws.receive_json()["type"] for _ in range(2)]
+        assert "run_summary" in kinds
+
+
+def test_current_snapshot_and_report_csv(client):
+    assert client.get("/runs/current").status_code == 204
+    run_id = start(client).json()["run_id"]
+    snap = client.get("/runs/current").json()
+    assert snap["run_id"] == run_id and snap["source"] == "test:Install_12"
+    assert next(s for s in snap["steps"] if s["id"] == "fan_1")["status"] == "active"
+    assert client.post(f"/runs/{run_id}/stop").status_code == 200
+    r = client.get(f"/runs/{run_id}/report?format=csv")
+    assert r.headers["content-type"].startswith("text/csv")
+    assert r.text.splitlines()[0] == "row_type,id,t,status,duration_s,message"
+    assert client.get(f"/runs/{run_id}/report").json()["run_id"] == run_id
+
+
+def test_pause_works_for_files_and_is_rejected_for_rtsp(client):
+    run_id = start(client).json()["run_id"]
+    assert client.post(f"/runs/{run_id}/control", json={"action": "pause"}).status_code == 200
+    client.post(f"/runs/{run_id}/stop")
+    rtsp_id = start(client, "rtsp:0").json()["run_id"]
+    r = client.post(f"/runs/{rtsp_id}/control", json={"action": "pause"})
+    assert r.status_code == 400 and r.json()["detail"] == "Only recorded videos can be paused."
+
+
+@pytest.fixture
+def tmp_repo(tmp_path):
+    (tmp_path / "data").mkdir()
+    sops = tmp_path / "sops"
+    sops.mkdir()
+    weights = tmp_path / "models" / "server_fan" / "best.pt"
+    weights.parent.mkdir(parents=True)
+    weights.write_bytes(b"x")
+    cfg = yaml.safe_load(Path("sops/server_fan.yaml").read_text(encoding="utf-8"))
+    cfg["detector"]["weights"] = str(weights)
+    (sops / "server_fan.yaml").write_text(yaml.safe_dump(cfg), encoding="utf-8")
+    settings = Settings(sop_data_root=tmp_path / "data", sops_dir=sops, typesafe_api_key=SecretStr("k"))
+    return settings, weights
+
+
+def test_startup_checks_pass_and_return_sops(tmp_repo):
+    settings, _ = tmp_repo
+    assert [s.sop for s in startup_checks(settings, GPU)] == ["server_fan_install"]
+
+
+def test_startup_checks_name_the_missing_api_key(tmp_repo):
+    settings, _ = tmp_repo
+    with pytest.raises(ConfigError, match="TYPESAFE_API_KEY is not set. Add it to .env."):
+        startup_checks(settings.model_copy(update={"typesafe_api_key": SecretStr("")}), GPU)
+
+
+def test_startup_checks_name_missing_weights(tmp_repo):
+    settings, weights = tmp_repo
+    weights.unlink()
+    with pytest.raises(ConfigError, match="Weights not found: .*best.pt"):
+        startup_checks(settings, GPU)

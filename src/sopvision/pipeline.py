@@ -236,6 +236,10 @@ class LiveRun:
             self.done.set()
             return self.report
 
+    def snapshot(self) -> dict:
+        """Current steps and alerts, for a dashboard that opens mid-run."""
+        return {"steps": [asdict(s) for s in self.core.tracker.steps()], "alerts": [asdict(a) for a in self.core.alerts]}
+
     def pause(self) -> None:
         getattr(self.source, "pause", lambda: None)()
 

@@ -14,7 +14,7 @@ from sopvision.sources.webcam import WebcamSource
 TEST_RUNS = (12, 13)
 WEBCAM_IN_CONTAINER = "Webcam isn't available in the container — run natively or use an RTSP source."
 
-__all__ = ["SourceSpec", "SourceUnavailableError", "list_sources", "open_source"]
+__all__ = ["SourceSpec", "SourceUnavailableError", "check_available", "list_sources", "open_source"]
 
 
 class SourceSpec(BaseModel):
@@ -43,12 +43,17 @@ def list_sources(settings: Settings) -> list[SourceSpec]:
     return specs
 
 
+def check_available(spec: SourceSpec, settings: Settings) -> None:
+    """Raise SourceUnavailableError when this environment can't use the source."""
+    if spec.kind == "webcam" and settings.sopvision_in_container:
+        raise SourceUnavailableError(WEBCAM_IN_CONTAINER)
+
+
 def open_source(spec: SourceSpec, settings: Settings,
                 mode: Literal["realtime", "lockstep"] = "realtime") -> VideoSource:
+    check_available(spec, settings)
     if spec.kind == "file":
         return FileSource(spec.path, mode=mode)
     if spec.kind == "webcam":
-        if settings.sopvision_in_container:
-            raise SourceUnavailableError(WEBCAM_IN_CONTAINER)
         return WebcamSource(spec.device or 0)
     return RtspSource(spec.url)
