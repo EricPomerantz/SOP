@@ -1,0 +1,78 @@
+sop: server_fan_install
+version: 1
+description: Install six fans, two power supplies and the cover on a 1U server.
+
+detector:
+  weights: models/server_fan/best.pt
+  classes: [chassis, fan, fan_bay_empty, psu, psu_bay_empty, cover, hand]
+  autolabel_prompts:               # used only by training/autolabel
+    chassis: "1U server chassis seen from above"
+    fan: "black server fan module"
+    fan_bay_empty: "empty fan slot"
+    psu: "power supply unit"
+    psu_bay_empty: "empty power supply bay"
+    cover: "metal server top cover"
+    hand: "hand"
+
+layout:
+  anchor: chassis                  # slot coords are normalised (0–1) within the chassis box
+  match_radius: 0.08               # max normalised distance for a detection to match a slot
+  slots:                           # placeholder centres; set for real with `sopvision calibrate`
+    fan_bay_1: {at: [0.47, 0.62], filled_by: fan, empty_as: fan_bay_empty}
+    fan_bay_2: {at: [0.47, 0.72], filled_by: fan, empty_as: fan_bay_empty}
+    fan_bay_3: {at: [0.47, 0.82], filled_by: fan, empty_as: fan_bay_empty}
+    fan_bay_4: {at: [0.47, 0.18], filled_by: fan, empty_as: fan_bay_empty}
+    fan_bay_5: {at: [0.47, 0.28], filled_by: fan, empty_as: fan_bay_empty}
+    fan_bay_6: {at: [0.47, 0.38], filled_by: fan, empty_as: fan_bay_empty}
+    psu_bay_1: {at: [0.12, 0.15], filled_by: psu, empty_as: psu_bay_empty}
+    psu_bay_2: {at: [0.12, 0.85], filled_by: psu, empty_as: psu_bay_empty}
+    cover:     {at: [0.50, 0.50], filled_by: cover, match_radius: 0.25}
+
+steps:
+  - id: fan_1
+    label: Fan 1
+    text: Install the first fan by connecting the connector, then pressing the fan in place.
+    evidence: {fan_bay_1: installed}
+  - id: fan_2
+    label: Fan 2
+    text: Install the second fan by connecting the connector, then pressing the fan in place.
+    evidence: {fan_bay_2: installed}
+  - id: fan_3
+    label: Fan 3
+    text: Install the third fan by connecting the connector, then pressing the fan in place.
+    evidence: {fan_bay_3: installed}
+  - id: fan_4
+    label: Fan 4
+    text: Install the fourth fan by connecting the connector, then pressing the fan in place.
+    evidence: {fan_bay_4: installed}
+  - id: fan_5
+    label: Fan 5
+    text: Install the fifth fan by connecting the connector, then pressing the fan in place.
+    evidence: {fan_bay_5: installed}
+  - id: fan_6
+    label: Fan 6
+    text: Install the sixth fan by connecting the connector, then pressing the fan in place.
+    evidence: {fan_bay_6: installed}
+  - id: psu_1
+    label: PSU 1
+    text: Install the first power supply by placing it in its compartment, then firmly pressing it in place until the latch clicks.
+    evidence: {psu_bay_1: installed}
+  - id: psu_2
+    label: PSU 2
+    text: Install the second power supply by placing it in its compartment, then firmly pressing it in place until the latch clicks.
+    evidence: {psu_bay_2: installed}
+  - id: cover
+    label: Cover
+    text: Place the cover on top of the server and press the black latch to lock it.
+    evidence: {cover: installed}
+
+order: strict                      # strict | any | groups
+# groups: [[fan_1, fan_2, fan_3, fan_4, fan_5, fan_6], [psu_1, psu_2], [cover]]   # when order: groups
+
+off_sop: Any action that is not one of the steps above.
+idle: No one is working on the server
+
+decisions:
+  accept_confidence: 0.8           # Jev confidence/probability needed to act
+  hold_seconds: 1.0                # how long a judgment must persist
+  evidence_only_after: 3.0         # mark done on evidence alone if Jev hasn't confirmed by then

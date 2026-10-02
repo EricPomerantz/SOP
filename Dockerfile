@@ -19,6 +19,8 @@ COPY pyproject.toml uv.lock README.md ./
 RUN uv sync --frozen --no-dev --no-install-project
 COPY src/ src/
 RUN uv sync --frozen --no-dev
+# Baked-in defaults; docker-compose.yml mounts ./sops over this so edits apply without a rebuild.
+COPY sops/ sops/
 
 ENV PATH=/app/.venv/bin:$PATH
 EXPOSE 8000
