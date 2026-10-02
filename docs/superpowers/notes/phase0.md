@@ -25,3 +25,23 @@ Running record of the spec's Phase 0 checks plus results that later tasks depend
 ## Training data (Task 7)
 
 - 640 frames sampled (576 train from Install 1, 3–10; 64 val from Install 11); no test-run frames.
+
+## Auto-labelling gate (Task 8) — failed; replaced by reference-frame labelling
+
+Zero-shot candidates on 20 frames spread over all SOP positions (count check: expected parts per position):
+
+| Labeller | Pass | What it finds |
+|---|---|---|
+| Grounding DINO base (per-class prompts from the SOP config) | 2/20 | hands; every other prompt boxes the whole server |
+| YOLOE 11-L (Ultralytics, text prompts; extra candidate) | 9/20, inflated | hands, occasional whole-server box; passes came from a count-check loophole (since fixed) |
+| SAM 3 (config prompts, threshold 0.5) | 0/20 | hands only |
+
+SAM 3 short-prompt probe (threshold 0.3): no fans or power supplies under any phrasing; "empty slot" fires on 11–36 slots per frame (PCIe, memory…); "metal cover" finds the fixed right-hand lid; "server" finds the chassis weakly (0.3–0.6); hands 0.9+.
+
+**Decision (user-approved):** reference-frame labelling. The user drew boxes once on three frames of Install_4 (start: chassis, 6 empty fan bays, 2 empty PSU bays; before cover: 6 fans, 2 PSUs; end: cover) — `data/reference/Install_4.json`. For every sampled frame:
+- SIFT + RANSAC homography to the reference (800–980 inliers typical, including the rotated Install_1/9);
+- bay identity from the step timeline: fan_1 = bottom bay of the lower group, filling upward, then the upper group bottom-up; PSU 1 = top-left, PSU 2 = bottom-left;
+- bay state from the timeline; the in-progress bay by appearance (z-normalised crop diff against the empty/installed references, restricted to the sub-region where those differ — a PSU only changes at its handle end);
+- bays matching neither reference (arms, cover) are left unlabelled; hands from SAM 3.
+
+Known gap: parts held in a hand (fan/PSU not yet in a bay) are not labelled, so the first detector won't report `held` parts.
