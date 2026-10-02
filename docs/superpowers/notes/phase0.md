@@ -45,3 +45,9 @@ SAM 3 short-prompt probe (threshold 0.3): no fans or power supplies under any ph
 - bays matching neither reference (arms, cover) are left unlabelled; hands from SAM 3.
 
 Known gap: parts held in a hand (fan/PSU not yet in a bay) are not labelled, so the first detector won't report `held` parts.
+
+## Detector training (Task 10)
+
+- YOLO26m (Ultralytics 8.4.171), imgsz 1280, batch 4 (batch 8 filled the 16 GB GPU and stalled), 2 workers; ~27–45 s/epoch on the RTX 4080.
+- Stopped at epoch 51 of 100 after a plateau (mAP50 ≈ 0.99 since epoch 17). Best epoch 48 on the Install_11 validation frames: **mAP50 0.994, mAP50-95 0.975**. Optimizer stripped: `models/server_fan/best.pt` is 44 MB (gitignored).
+- `sopvision calibrate --run 9` with the trained detector: every slot centre lands on its bay on the rotated recording.
