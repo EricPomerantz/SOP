@@ -24,3 +24,13 @@ def test_indices_keep_increasing_across_reconnects():
     caps = [FakeCapture(fail_after=2), FakeCapture(frames=2)]
     src = RtspSource("rtsp://x", open_capture=lambda _: caps.pop(0), sleep=lambda s: None)
     assert [f.index for f in itertools.islice(src.frames(), 4)] == [0, 1, 2, 3]
+
+
+def test_rtsp_close_leaves_release_to_the_reading_thread():
+    cap = FakeCapture(frames=5)
+    src = RtspSource("rtsp://x", open_capture=lambda _: cap, sleep=lambda s: None)
+    stream = src.frames()
+    next(stream)
+    src.close()
+    assert not cap.released
+    assert list(stream) == [] and cap.released

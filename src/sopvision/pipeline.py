@@ -131,9 +131,14 @@ class RunCore:
         if not self.closed:
             self.emit([Alert(self.last_t, "warning", "source_lost", "Video source lost — reconnecting")])
 
-    def finish(self) -> dict:
-        """End the run: incomplete check, summary event, close the log. Nothing is written afterwards."""
-        self.emit(self.tracker.end_run(self.last_t))
+    def finish(self, check_incomplete: bool = True) -> dict:
+        """End the run: incomplete check, summary event, close the log. Nothing is written afterwards.
+
+        A run aborted by a system failure (source or processing error) skips the incomplete check: the operator
+        didn't leave the SOP unfinished, the system stopped watching.
+        """
+        if check_incomplete:
+            self.emit(self.tracker.end_run(self.last_t))
         report = asdict(build_report(self.events))
         self._log(self.last_t, "run_summary", {"report": report})
         self.broadcast(to_ws(RunSummaryMsg(t=self.last_t, report=report)))
@@ -171,6 +176,7 @@ class LiveRun:
         self.reader: LatestFrameReader | None = None
         self.report: dict | None = None
         self._stopping = False
+        self._aborted = False
         self._stop_lock = asyncio.Lock()
         self._jev_ms: float | None = None
         if hasattr(source, "on_lost"):
@@ -184,13 +190,23 @@ class LiveRun:
         self._poller = asyncio.create_task(self._poll())
 
     def _pipeline(self) -> None:
+        try:
+            self._process_frames()
+        except Exception as e:  # noqa: BLE001 — any failure must end the run visibly, not freeze it
+            self.loop.call_soon_threadsafe(self._failed, "pipeline_error", f"Processing failed: {e}")
+
+    def _process_frames(self) -> None:
         last = time.perf_counter()
         fps = 0.0
         while not self._stopping:
             frame = self.reader.get(timeout=0.5)
             if frame is None:
                 if self.reader.exhausted:
-                    self.loop.call_soon_threadsafe(self._source_ended)
+                    if self.reader.error is not None:
+                        self.loop.call_soon_threadsafe(self._failed, "source_lost",
+                                                       f"Video source failed: {self.reader.error}")
+                    else:
+                        self.loop.call_soon_threadsafe(self._source_ended)
                     return
                 continue
             start = time.perf_counter()
@@ -223,6 +239,13 @@ class LiveRun:
         if not self._stopping:
             asyncio.ensure_future(self.stop())
 
+    def _failed(self, kind: str, message: str) -> None:
+        if self._stopping:
+            return
+        self.core.emit([Alert(self.core.last_t, "warning", kind, message)])
+        self._aborted = True
+        asyncio.ensure_future(self.stop())
+
     def _source_lost_threadsafe(self) -> None:
         self.loop.call_soon_threadsafe(self.core.source_lost)
 
@@ -236,7 +259,7 @@ class LiveRun:
             if self.reader is not None:
                 await asyncio.to_thread(self.reader.close)
             await asyncio.to_thread(self._thread.join, 2.0)
-            self.report = self.core.finish()
+            self.report = self.core.finish(check_incomplete=not self._aborted)
             self.done.set()
             return self.report
 

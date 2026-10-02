@@ -72,7 +72,7 @@ export default function App({ api = httpApi, connect = connectSocket }: Props) {
 
   return (
     <main className="app">
-      <TopBar title={sop ? "Server fan install" : "SOP Vision"} version={sop?.version} source={source?.label}
+      <TopBar title={sop?.name ?? "SOP Vision"} version={sop?.version} source={source?.label}
               elapsed={state.elapsed} status={state.status} running={running} />
       {error && <p className="error" role="alert">{error}</p>}
       <div className="main-grid">

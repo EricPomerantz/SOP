@@ -6,7 +6,7 @@ from typing import Literal
 StepStatus = Literal["pending", "active", "done"]
 AlertLevel = Literal["info", "warning", "violation"]
 AlertKind = Literal["order_violation", "part_removed", "off_sop", "anomaly", "sop_incomplete", "jev_offline",
-                    "chassis_lost", "source_lost"]
+                    "chassis_lost", "source_lost", "pipeline_error"]
 
 
 @dataclass(frozen=True)

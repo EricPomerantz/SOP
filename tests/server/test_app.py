@@ -139,7 +139,8 @@ def test_pause_works_for_files_and_is_rejected_for_rtsp(client):
 
 @pytest.fixture
 def tmp_repo(tmp_path):
-    (tmp_path / "data").mkdir()
+    (tmp_path / "data" / "raw").mkdir(parents=True)
+    (tmp_path / "data" / "test").mkdir()
     sops = tmp_path / "sops"
     sops.mkdir()
     weights = tmp_path / "models" / "server_fan" / "best.pt"
@@ -168,3 +169,17 @@ def test_startup_checks_name_missing_weights(tmp_repo):
     weights.unlink()
     with pytest.raises(ConfigError, match="Weights not found: .*best.pt"):
         startup_checks(settings, GPU)
+
+
+def test_back_to_back_runs_get_their_own_ids_and_logs(client):
+    first = start(client).json()["run_id"]
+    client.post(f"/runs/{first}/stop")
+    second = start(client).json()["run_id"]
+    client.post(f"/runs/{second}/stop")
+    assert first != second
+    for run_id in (first, second):
+        assert client.get(f"/runs/{run_id}/report").json()["run_id"] == run_id
+
+
+def test_sops_carry_a_display_name(client):
+    assert client.get("/sops").json()[0]["name"] == "Server fan install"

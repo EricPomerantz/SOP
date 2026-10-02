@@ -36,6 +36,6 @@ class WebcamSource:
             cap.release()
 
     def close(self) -> None:
+        """Stop the stream. The reading thread releases the capture on its way out: OpenCV captures aren't
+        safe to release while another thread is inside read()."""
         self._closed = True
-        if self._cap is not None:
-            self._cap.release()

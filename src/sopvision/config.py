@@ -52,6 +52,7 @@ class DecisionSpec(_Model):
 
 class SopConfig(_Model):
     sop: str
+    name: str | None = None  # display name for the dashboard; defaults to the id
     version: int
     description: str
     detector: DetectorSpec
@@ -66,6 +67,8 @@ class SopConfig(_Model):
     @model_validator(mode="after")
     def _cross_field_rules(self) -> "SopConfig":
         classes = set(self.detector.classes)
+        if self.layout.anchor not in classes:
+            raise ValueError(f"layout: anchor '{self.layout.anchor}' is not a detector class")
         for name, slot in self.layout.slots.items():
             for field in ("filled_by", "empty_as"):
                 value = getattr(slot, field)
@@ -86,6 +89,10 @@ class SopConfig(_Model):
             if sorted(flat) != sorted(seen):
                 raise ValueError("groups must contain every step exactly once")
         return self
+
+    @property
+    def display_name(self) -> str:
+        return self.name or self.sop
 
     def step(self, step_id: str) -> StepSpec:
         for s in self.steps:

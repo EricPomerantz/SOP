@@ -414,7 +414,8 @@ def write_slots(ref_json: Path, sop_path: Path, check_run: int, check_out: Path)
     print("wrote", sop_path, coords)
     sop = load_sop(sop_path)
     run = {r.run: r for r in load_index(settings.sop_data_root)}[check_run]
-    target = next(c for c in calibration_targets(sop, run) if c.slot == "psu_bay_1")  # fans + one PSU in place
+    targets = calibration_targets(sop, run)
+    target = targets[-2] if len(targets) > 1 else targets[-1]  # most parts in place, final step not yet done
     frame = read_frame(run.raw_path, target.t)
     h, inliers = ref.align(frame)
     if h is None:

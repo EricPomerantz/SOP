@@ -1,4 +1,5 @@
 sop: server_fan_install
+name: Server fan install
 version: 1
 description: Install six fans, two power supplies and the cover on a 1U server.
 

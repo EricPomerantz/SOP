@@ -6,7 +6,7 @@ import type { RunSnapshot, Sop, WsMessage } from "./types";
 
 const STEPS = ["Fan 1", "Fan 2", "Fan 3", "Fan 4", "Fan 5", "Fan 6", "PSU 1", "PSU 2", "Cover"];
 const SOP: Sop = {
-  id: "server_fan_install", version: 1, description: "Install six fans, two power supplies and the cover on a 1U server.",
+  id: "server_fan_install", name: "Bench assembly", version: 1, description: "Install six fans, two power supplies and the cover on a 1U server.",
   steps: STEPS.map((label) => ({ id: label.toLowerCase().replace(" ", "_"), label, text: label })),
 };
 const RUNNING: RunSnapshot = { run_id: "r1", sop: SOP.id, source: "test:Install_12", steps: [], alerts: [], last_decision: null };
@@ -60,4 +60,9 @@ test("with no run in progress it offers sources to start one", async () => {
   render(<App api={fakeApi(null)} connect={fakeSocket().connect} />);
   expect(await screen.findByRole("option", { name: "Install_12 (test run)" })).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Start" })).toBeEnabled();
+});
+
+test("the top bar shows the SOP's own name", async () => {
+  render(<App api={fakeApi(null)} connect={fakeSocket().connect} />);
+  expect(await screen.findByText("Bench assembly")).toBeInTheDocument();
 });

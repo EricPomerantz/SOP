@@ -7,6 +7,16 @@ import typer
 app = typer.Typer(help="Live SOP monitoring with object detection and Jev.", no_args_is_help=True)
 
 
+def _check_data_root(settings) -> None:
+    from sopvision.config import ConfigError
+
+    try:
+        settings.check_data_root()
+    except ConfigError as e:
+        typer.echo(str(e), err=True)
+        raise typer.Exit(1)
+
+
 @app.command()
 def serve(host: str = typer.Option("127.0.0.1", help="Interface to listen on"),
           port: int = typer.Option(8000, help="Port")) -> None:
@@ -50,11 +60,13 @@ def calibrate(
     from sopvision.sources.file import FileSource
 
     cfg, settings = load_sop(sop), Settings()
+    _check_data_root(settings)
     if not cfg.detector.weights.exists():
         typer.echo(f"Weights not found: {cfg.detector.weights}. Train the detector first (training/train.py).", err=True)
         raise typer.Exit(1)
     index = {r.run: r for r in load_index(settings.sop_data_root)}[run]
-    target = next(c for c in calibration_targets(cfg, index) if c.slot == "psu_bay_1")
+    targets = calibration_targets(cfg, index)
+    target = targets[-2] if len(targets) > 1 else targets[-1]  # most parts in place, final step not yet done
     frame = next(f for f in FileSource(index.raw_path, mode="lockstep").frames() if f.t >= target.t)
     dets = YoloDetector(cfg.detector.weights, cfg.detector.classes).detect(frame)
     chassis = max((d for d in dets if d.cls == "chassis"), key=lambda d: d.conf, default=None)
@@ -133,6 +145,8 @@ def make_scenarios(run: int = typer.Option(12, help="Recording to build the scen
     from sopvision.evaluation.scenarios import SCENARIOS, render_scenario
     from sopvision.settings import Settings
 
-    index = {r.run: r for r in load_index(Settings().sop_data_root)}[run]
+    settings = Settings()
+    _check_data_root(settings)
+    index = {r.run: r for r in load_index(settings.sop_data_root)}[run]
     for spec in SCENARIOS:
         typer.echo(f"wrote {render_scenario(index, spec, out)}")

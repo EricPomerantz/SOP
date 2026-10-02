@@ -63,3 +63,12 @@ def test_must_precede_by_order_mode(sop):
 def test_hands_off_steps_and_timing(sop):
     assert sop.step("cover").hands_off is True and sop.step("fan_1").hands_off is False
     assert sop.decisions.evidence_only_after == 1.0 and sop.decisions.hands_off_seconds == 0.5
+
+
+def test_anchor_must_be_a_detector_class(tmp_path):
+    with pytest.raises(ConfigError, match=re.escape("layout: anchor 'frame' is not a detector class")):
+        load_sop(write_mutated(tmp_path, lambda d: d["layout"].update(anchor="frame")))
+
+
+def test_display_name(sop):
+    assert sop.name == "Server fan install"

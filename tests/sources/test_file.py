@@ -42,9 +42,11 @@ def test_zero_fps_metadata_uses_pos_msec():  # Review Focus 2
     assert [f.t for f in FileSource("x", mode="lockstep", open_capture=lambda _: cap).frames()] == [0, 0.04, 0.08]
 
 
-def test_close_releases_capture():
+def test_close_stops_the_stream_and_the_reader_releases_the_capture():
     cap = FakeCapture(frames=3)
     src = FileSource("x", mode="lockstep", open_capture=lambda _: cap)
-    next(iter(src.frames()))
+    stream = src.frames()
+    next(stream)
     src.close()
-    assert cap.released
+    assert not cap.released  # never released from the closing thread: OpenCV isn't safe to release mid-read
+    assert list(stream) == [] and cap.released

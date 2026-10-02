@@ -31,5 +31,13 @@ class Settings(BaseSettings):
         return value
 
     def check_data_root(self) -> None:
-        if not self.sop_data_root.is_dir():
-            raise ConfigError(f"SOP_DATA_ROOT points to {self.sop_data_root}, which doesn't exist. Set it in .env.")
+        """Fail with the variable to fix when the dataset folder is missing or isn't a recordings dataset."""
+        # In the container SOP_DATA_ROOT is fixed by docker-compose; the user-facing knob is SOP_DATASET_DIR.
+        fix = ("Set SOP_DATASET_DIR in .env (docker-compose mounts it at /data)." if self.sopvision_in_container
+               else None)
+        root = self.sop_data_root
+        if not root.is_dir():
+            raise ConfigError(f"SOP_DATA_ROOT points to {root}, which doesn't exist. {fix or 'Set it in .env.'}")
+        if not ((root / "raw").is_dir() and (root / "test").is_dir()):
+            raise ConfigError(f"SOP_DATA_ROOT points to {root}, which isn't a recordings dataset (needs raw/ and test/ "
+                              f"folders). {fix or 'Set SOP_DATA_ROOT in .env.'}")

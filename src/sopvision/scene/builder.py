@@ -9,7 +9,6 @@ from sopvision.perception.detector import Detection
 from sopvision.scene.geometry import ChassisAnchor, box_distance_norm, center_norm, match_slots, to_norm
 from sopvision.scene.types import HandView, Observed, SceneEvent, SceneState, SlotView
 
-HELD_CLASSES = ("fan", "psu", "cover")
 HELD_TOUCH = 0.02  # normalised gap between a part and a hand that still counts as holding it
 
 
@@ -38,6 +37,8 @@ def _intersects(a, b) -> bool:
 class SceneBuilder:
     def __init__(self, sop: SopConfig, settle_seconds: float = 0.5):
         self.sop, self.settle = sop, settle_seconds
+        self.anchor_class = sop.layout.anchor
+        self.part_classes = {spec.filled_by for spec in sop.layout.slots.values()}  # what can be held
         self.anchor = ChassisAnchor()
         self.tracks = {name: _SlotTrack() for name in sop.layout.slots}
         self.version = 0
@@ -49,7 +50,7 @@ class SceneBuilder:
         self.version += 1
         self.last_detections = detections
         events: list[SceneEvent] = []
-        chassis = max((d for d in detections if d.cls == "chassis"), key=lambda d: d.conf, default=None)
+        chassis = max((d for d in detections if d.cls == self.anchor_class), key=lambda d: d.conf, default=None)
         anchor = self.anchor.update(t, chassis.xyxy if chassis else None)
         if anchor.lost_event:
             events.append(SceneEvent(t, "chassis_lost"))
@@ -62,13 +63,13 @@ class SceneBuilder:
         else:
             box = anchor.box
             hand_boxes = [d.xyxy for d in detections if d.cls == "hand"]
-            parts = [d for d in detections if d.cls not in ("chassis", "hand")]
+            parts = [d for d in detections if d.cls not in (self.anchor_class, "hand")]
             matched = match_slots(parts, self.sop, box)
             slots = {name: self._slot_view(t, name, matched.get(name), hand_boxes, box, events)
                      for name in self.sop.layout.slots}
             hands = [HandView(self._zone(hb, box)) for hb in hand_boxes]
             matched_ids = {id(d) for d in matched.values()}
-            held = sorted({d.cls for d in parts if d.cls in HELD_CLASSES and id(d) not in matched_ids
+            held = sorted({d.cls for d in parts if d.cls in self.part_classes and id(d) not in matched_ids
                            and any(_gap_norm(d.xyxy, hb, box) <= HELD_TOUCH for hb in hand_boxes)})
 
         zones = [h.near for h in hands]

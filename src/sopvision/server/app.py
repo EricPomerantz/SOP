@@ -34,7 +34,7 @@ def create_app(settings: Settings, manager: RunManager) -> FastAPI:
 
     @app.get("/sops")
     def sops():
-        return [{"id": s.sop, "version": s.version, "description": s.description,
+        return [{"id": s.sop, "name": s.display_name, "version": s.version, "description": s.description,
                  "steps": [{"id": st.id, "label": s.step_label(st.id), "text": st.text} for st in s.steps]}
                 for s in manager.sops.values()]
 

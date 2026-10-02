@@ -131,3 +131,27 @@ def test_occluded_slot_counts_as_touched(sop):
     settle_empty(b, sop)
     s, _ = b.update(1.0, [chassis(), at(sop, "fan_bay_1", "hand", size=80)])
     assert s.slots["fan_bay_1"].state == "occluded" and s.slots["fan_bay_1"].touched is True
+
+
+def renamed_anchor(sop, name="frame"):
+    classes = [name if c == "chassis" else c for c in sop.detector.classes]
+    return sop.model_copy(update={"detector": sop.detector.model_copy(update={"classes": classes}),
+                                  "layout": sop.layout.model_copy(update={"anchor": name})})
+
+
+def test_anchor_class_comes_from_the_layout(sop):
+    b = SceneBuilder(renamed_anchor(sop))
+    s, _ = b.update(0.0, [Detection("frame", CHASSIS, 0.9, None)])
+    assert s.chassis_visible
+    s, _ = SceneBuilder(renamed_anchor(sop)).update(0.0, [Detection("chassis", CHASSIS, 0.9, None)])
+    assert not s.chassis_visible
+
+
+def test_held_classes_come_from_the_slots(sop):
+    slots = dict(sop.layout.slots)
+    slots["fan_bay_1"] = slots["fan_bay_1"].model_copy(update={"filled_by": "battery"})
+    other = sop.model_copy(update={
+        "detector": sop.detector.model_copy(update={"classes": sop.detector.classes + ["battery"]}),
+        "layout": sop.layout.model_copy(update={"slots": slots})})
+    s, _ = SceneBuilder(other).update(0.0, [chassis(), det_at("battery", 0.8, 0.9, size=50), det_at("hand", 0.84, 0.9, size=50)])
+    assert s.held == ["battery"]

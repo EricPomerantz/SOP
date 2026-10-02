@@ -124,3 +124,41 @@ async def test_stop_during_inflight_call_writes_nothing_after_summary(sop, tmp_p
     await asyncio.sleep(1.2)  # the cancelled Jev call would have returned by now
     types = [e.type for e in read_events(tmp_path / "run.jsonl")]
     assert types[-1] == "run_summary" and types.count("run_summary") == 1
+
+
+class BrokenSource:
+    fps = 30.0
+
+    def frames(self):
+        from sopvision.sources.base import SourceUnavailableError
+        raise SourceUnavailableError("Can't open webcam 0. Is it plugged in and not used by another app?")
+        yield  # pragma: no cover
+
+    def close(self):
+        pass
+
+
+class FailingDetector(ScriptedDetector):
+    def detect(self, frame):
+        if frame.index >= 3:
+            raise RuntimeError("CUDA error: out of memory")
+        return super().detect(frame)
+
+
+async def test_source_that_fails_to_open_reports_its_error_not_an_incomplete_sop(sop, tmp_path):
+    run = live_run(sop, tmp_path, BrokenSource(), ScriptedDetector(sop), OracleClient(sop))
+    await run.start()
+    await asyncio.wait_for(run.done.wait(), 5)
+    alerts = [m for m in run.messages if m["type"] == "alert"]
+    assert [a["kind"] for a in alerts] == ["source_lost"]
+    assert alerts[0]["message"] == "Video source failed: Can't open webcam 0. Is it plugged in and not used by another app?"
+
+
+async def test_processing_error_ends_the_run_with_an_alert(sop, tmp_path):
+    run = live_run(sop, tmp_path, ScriptedSource(10, paced=True), FailingDetector(sop), OracleClient(sop))
+    await run.start()
+    await asyncio.wait_for(run.done.wait(), 5)
+    alerts = [m for m in run.messages if m["type"] == "alert"]
+    assert [a["kind"] for a in alerts] == ["pipeline_error"]
+    assert alerts[0]["message"] == "Processing failed: CUDA error: out of memory"
+    assert read_events(tmp_path / "run.jsonl")[-1].type == "run_summary"

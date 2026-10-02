@@ -1,5 +1,6 @@
 """Startup checks and the one-run-at-a-time manager behind the API."""
 
+import secrets
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -100,7 +101,7 @@ class RunManager:
         if sop is None or spec is None:
             raise NotFoundError(f"Unknown {'SOP ' + sop_id if sop is None else 'source ' + source_id}")
         check_available(spec, self.settings)
-        run_id = time.strftime("run-%Y%m%d-%H%M%S")
+        run_id = time.strftime("run-%Y%m%d-%H%M%S-") + secrets.token_hex(2)  # unique even within one second
         runlog = RunLog(self.settings.runs_dir / f"{run_id}.jsonl")
         ctx = RunContext(run_id, sop, spec, runlog, self.broadcast, self.frames)
         self.run, self.spec, self.last_decision = self.run_factory(ctx, spec), spec, None

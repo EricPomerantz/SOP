@@ -12,7 +12,7 @@ export type WsMessage = SceneMsg | DecisionMsg | StepUpdateMsg | AlertMsg | RunS
 
 export type StepStatus = "pending" | "active" | "done";
 export type SopStep = { id: string; label: string; text: string };
-export type Sop = { id: string; version: number; description: string; steps: SopStep[] };
+export type Sop = { id: string; name: string; version: number; description: string; steps: SopStep[] };
 export type SourceSpec = { id: string; kind: "file" | "webcam" | "rtsp"; label: string };
 export type RunInfo = { run_id: string; sop: string; source: string };
 export type RunSnapshot = RunInfo & {

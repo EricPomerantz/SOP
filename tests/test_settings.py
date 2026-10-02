@@ -27,3 +27,23 @@ def test_gateway_settings_read_sdk_env_names(monkeypatch):
     monkeypatch.setenv("TYPESAFE_DEFAULT_MODEL", "typesafe-ai/jev")
     s = Settings()
     assert (s.typesafe_base_url, s.typesafe_model) == ("https://ai-gateway.vercel.sh/typesafe", "typesafe-ai/jev")
+
+
+def test_data_root_that_is_not_a_dataset_is_named(monkeypatch, tmp_path):
+    monkeypatch.setenv("SOP_DATA_ROOT", str(tmp_path))  # exists, but no raw/ and test/
+    with pytest.raises(ConfigError, match=r"isn't a recordings dataset \(needs raw/ and test/ folders\)\. Set SOP_DATA_ROOT in \.env\."):
+        Settings().check_data_root()
+
+
+def test_container_message_points_at_the_compose_variable(monkeypatch, tmp_path):
+    monkeypatch.setenv("SOP_DATA_ROOT", str(tmp_path / "nope"))
+    monkeypatch.setenv("SOPVISION_IN_CONTAINER", "1")
+    with pytest.raises(ConfigError, match=r"Set SOP_DATASET_DIR in \.env"):
+        Settings().check_data_root()
+
+
+def test_valid_dataset_layout_passes(monkeypatch, tmp_path):
+    (tmp_path / "raw").mkdir()
+    (tmp_path / "test").mkdir()
+    monkeypatch.setenv("SOP_DATA_ROOT", str(tmp_path))
+    Settings().check_data_root()
