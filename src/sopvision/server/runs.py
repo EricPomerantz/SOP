@@ -46,7 +46,7 @@ def startup_checks(settings: Settings, gpu: GpuReport) -> list[SopConfig]:
                               "or fix detector.weights.")
     if not settings.typesafe_api_key.get_secret_value():
         raise ConfigError("TYPESAFE_API_KEY is not set. Add it to .env.")
-    return sops
+    return [settings.apply_decision_overrides(sop) for sop in sops]
 
 
 def default_run_factory(settings: Settings) -> Callable:
@@ -103,7 +103,7 @@ class RunManager:
         check_available(spec, self.settings)
         run_id = time.strftime("run-%Y%m%d-%H%M%S-") + secrets.token_hex(2)  # unique even within one second
         runlog = RunLog(self.settings.runs_dir / f"{run_id}.jsonl")
-        ctx = RunContext(run_id, sop, spec, runlog, self.broadcast, self.frames)
+        ctx = RunContext(run_id, sop, spec, runlog, self.broadcast, self.frames, self.settings.sopvision_decider_name)
         self.run, self.spec, self.last_decision = self.run_factory(ctx, spec), spec, None
         self.info = RunInfo(run_id=run_id, sop=sop.sop, source=spec.id)
         await self.run.start()

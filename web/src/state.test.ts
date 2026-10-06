@@ -47,3 +47,8 @@ test("scene without chassis shows the banner flag and advances the clock", () =>
   expect(s.chassisVisible).toBe(false);
   expect(s.elapsed).toBe(12.5);
 });
+
+test("steps the decision model completes are credited to it by name", () => {
+  const msg: WsMessage = { type: "step_update", t: 9.1, step_id: "fan_1", status: "done", source: "jev", duration: 9.1 };
+  expect(reduce(initial(STEPS, "Kev"), msg).log[0].text).toBe("Fan 1 complete · by Kev");
+});

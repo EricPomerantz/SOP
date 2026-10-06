@@ -6,7 +6,7 @@ from typing import Annotated
 from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
-from sopvision.config import ConfigError
+from sopvision.config import ConfigError, SopConfig
 
 
 class Settings(BaseSettings):
@@ -22,6 +22,12 @@ class Settings(BaseSettings):
     sops_dir: Path = Path("sops")
     runs_dir: Path = Path("runs")
     scenarios_dir: Path = Path("data/scenarios")
+    # The decision model's name as people see it (dashboard, alerts); "Kev" when docker-compose.kev.yml runs Kev.
+    sopvision_decider_name: str = "Jev"
+    # A decision model's own thresholds (e.g. Kev's, set in docker-compose.kev.yml); unset = the SOP file's values.
+    sopvision_step_confidence: float | None = Field(default=None, ge=0, le=1)
+    sopvision_done_confidence: float | None = Field(default=None, ge=0, le=1)
+    sopvision_anomaly_confidence: float | None = Field(default=None, ge=0, le=1)
 
     @field_validator("sopvision_rtsp_urls", mode="before")
     @classmethod
@@ -29,6 +35,14 @@ class Settings(BaseSettings):
         if isinstance(value, str):
             return [u.strip() for u in value.split(",") if u.strip()]
         return value
+
+    def apply_decision_overrides(self, sop: SopConfig) -> SopConfig:
+        updates = {"step_confidence": self.sopvision_step_confidence, "done_confidence": self.sopvision_done_confidence,
+                   "anomaly_confidence": self.sopvision_anomaly_confidence}
+        updates = {k: v for k, v in updates.items() if v is not None}
+        if not updates:
+            return sop
+        return sop.model_copy(update={"decisions": sop.decisions.model_copy(update=updates)})
 
     def check_data_root(self) -> None:
         """Fail with the variable to fix when the dataset folder is missing or isn't a recordings dataset."""

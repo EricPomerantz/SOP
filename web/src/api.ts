@@ -1,6 +1,7 @@
-import type { RunInfo, RunSnapshot, Sop, SourceSpec, WsMessage } from "./types";
+import type { Info, RunInfo, RunSnapshot, Sop, SourceSpec, WsMessage } from "./types";
 
 export type Api = {
+  getInfo(): Promise<Info>;
   getSops(): Promise<Sop[]>;
   getSources(): Promise<SourceSpec[]>;
   getCurrent(): Promise<RunSnapshot | null>;
@@ -21,6 +22,7 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const httpApi: Api = {
+  getInfo: () => call("/info"),
   getSops: () => call("/sops"),
   getSources: () => call("/sources"),
   getCurrent: () => call("/runs/current"),

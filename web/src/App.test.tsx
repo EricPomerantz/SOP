@@ -1,4 +1,4 @@
-import { act, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import App from "./App";
 import type { Api } from "./api";
 import stream from "./fixtures/run_stream.json";
@@ -11,8 +11,9 @@ const SOP: Sop = {
 };
 const RUNNING: RunSnapshot = { run_id: "r1", sop: SOP.id, source: "test:Install_12", steps: [], alerts: [], last_decision: null };
 
-function fakeApi(current: RunSnapshot | null): Api {
+function fakeApi(current: RunSnapshot | null, decider = "Jev"): Api {
   return {
+    getInfo: async () => ({ decider }),
     getSops: async () => [SOP],
     getSources: async () => [{ id: "test:Install_12", kind: "file", label: "Install_12 (test run)" }],
     getCurrent: async () => current,
@@ -65,4 +66,18 @@ test("with no run in progress it offers sources to start one", async () => {
 test("the top bar shows the SOP's own name", async () => {
   render(<App api={fakeApi(null)} connect={fakeSocket().connect} />);
   expect(await screen.findByText("Bench assembly")).toBeInTheDocument();
+});
+
+test("the dashboard names the decision model in use", async () => {
+  render(<App api={fakeApi(null, "Kev")} connect={fakeSocket().connect} />);
+  expect(await screen.findByLabelText("Kev now")).toHaveTextContent("Kev now");
+  expect(screen.queryByText("Jev now")).not.toBeInTheDocument();
+});
+
+test("starting a run keeps the decision model's name", async () => {
+  render(<App api={fakeApi(null, "Kev")} connect={fakeSocket().connect} />);
+  await screen.findByLabelText("Kev now");
+  fireEvent.click(screen.getByRole("button", { name: "Start" }));
+  await waitFor(() => expect(screen.getByRole("button", { name: "Stop" })).toBeInTheDocument());
+  expect(screen.getByLabelText("Kev now")).toBeInTheDocument();
 });

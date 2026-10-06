@@ -30,8 +30,8 @@ class _Streak:
 
 
 class SopTracker:
-    def __init__(self, sop: SopConfig):
-        self.sop = sop
+    def __init__(self, sop: SopConfig, decider: str = "Jev"):
+        self.sop, self.decider = sop, decider
         self.order = [s.id for s in sop.steps]
         self._steps = {sid: StepState(sid, "pending", None, None, None, None) for sid in self.order}
         self._active: str | None = None
@@ -57,8 +57,9 @@ class SopTracker:
     # -- inputs --------------------------------------------------------------------------------------------
     def on_decision(self, d: Decision, scene: SceneState) -> list[StepUpdate | Alert]:
         out: list[StepUpdate | Alert] = []
-        acc, hold, a, t = self.sop.decisions.accept_confidence, self.sop.decisions.hold_seconds, d.answers, d.t_request
-        confident = a.current_step if a.current_confidence >= acc else None
+        dec, a, t = self.sop.decisions, d.answers, d.t_request
+        hold = dec.hold_seconds
+        confident = a.current_step if a.current_confidence >= dec.step_threshold else None
 
         held = self._activate.update(confident if confident in self._steps else None, t)
         if held is not None and held >= hold and confident != self._active and self._steps[confident].status != "done":
@@ -69,13 +70,13 @@ class SopTracker:
             self._off_sop.fired = True
             out.append(Alert(t, "warning", "off_sop", "Off-SOP activity"))
 
-        held = self._anomaly.update("anomaly" if a.anomaly >= acc else None, t)
+        held = self._anomaly.update("anomaly" if a.anomaly >= dec.anomaly_threshold else None, t)
         if held is not None and held >= hold and not self._anomaly.fired:
             self._anomaly.fired = True
             out.append(Alert(t, "warning", "anomaly", "Something looks inconsistent with the SOP",
                              data={"scene": scene.to_jev_dict()}))
 
-        held = self._done.update(d.active_step_id if a.active_step_done >= acc else None, t)
+        held = self._done.update(d.active_step_id if a.active_step_done >= dec.done_threshold else None, t)
         step = self._steps.get(d.active_step_id)
         if (held is not None and held >= hold and step is not None and step.status != "done"
                 and self._evidence_holds(d.active_step_id, scene)):
@@ -111,7 +112,7 @@ class SopTracker:
         return out
 
     def set_jev_online(self, online: bool, t: float) -> list[Alert]:
-        return [] if online else [Alert(t, "warning", "jev_offline", "Jev offline — using evidence only")]
+        return [] if online else [Alert(t, "warning", "jev_offline", f"{self.decider} offline — using evidence only")]
 
     def end_run(self, t: float) -> list[Alert]:
         missing = [s for s in self.order if self._steps[s].status != "done"]

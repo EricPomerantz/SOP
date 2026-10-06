@@ -47,3 +47,20 @@ def test_valid_dataset_layout_passes(monkeypatch, tmp_path):
     (tmp_path / "test").mkdir()
     monkeypatch.setenv("SOP_DATA_ROOT", str(tmp_path))
     Settings().check_data_root()
+
+
+def test_decision_model_thresholds_override_the_sop(monkeypatch, sop):
+    monkeypatch.setenv("SOPVISION_STEP_CONFIDENCE", "0.3")
+    monkeypatch.setenv("SOPVISION_ANOMALY_CONFIDENCE", "0.95")
+    d = Settings().apply_decision_overrides(sop).decisions
+    assert (d.step_threshold, d.done_threshold, d.anomaly_threshold) == (0.3, 0.8, 0.95)
+
+
+def test_no_overrides_leave_the_sop_alone(sop):
+    assert Settings().apply_decision_overrides(sop) == sop
+
+
+def test_decision_model_name_defaults_to_jev(monkeypatch):
+    assert Settings().sopvision_decider_name == "Jev"
+    monkeypatch.setenv("SOPVISION_DECIDER_NAME", "Kev")
+    assert Settings().sopvision_decider_name == "Kev"

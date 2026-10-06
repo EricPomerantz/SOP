@@ -32,6 +32,10 @@ class Control(BaseModel):
 def create_app(settings: Settings, manager: RunManager) -> FastAPI:
     app = FastAPI(title="SOP Vision")
 
+    @app.get("/info")
+    def info():
+        return {"decider": settings.sopvision_decider_name}
+
     @app.get("/sops")
     def sops():
         return [{"id": s.sop, "name": s.display_name, "version": s.version, "description": s.description,

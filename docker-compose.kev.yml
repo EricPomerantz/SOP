@@ -1,0 +1,43 @@
+# Fully local: the open Kev decision model (docker/kev) answers in place of the hosted Jev.
+#   docker compose -f docker-compose.yml -f docker-compose.kev.yml up --build
+# Same API as Jev, so the app is unchanged; only where its decision requests go differs.
+services:
+  kev:
+    build: docker/kev
+    image: sopvision-kev:latest
+    ports:
+      - "127.0.0.1:8009:8009"   # for checks from the host; the app reaches it as http://kev:8009
+    volumes:
+      - kev-hf-cache:/hf        # model weights (~8 GB), downloaded on the first start only
+    environment:
+      KEV_CUDA_GRAPHS: "0"      # graph buffers don't fit a 16 GB GPU shared with the detector (CUDA out of memory)
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8009/v1/models')"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30m         # first start includes the weights download
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  sopvision:
+    environment:
+      TYPESAFE_BASE_URL: http://kev:8009
+      TYPESAFE_DEFAULT_MODEL: kev-4b
+      TYPESAFE_API_KEY: kev-local   # Kev runs without auth; the real Jev key isn't sent to it
+      SOPVISION_DECIDER_NAME: Kev   # what the dashboard and alerts call the decision model
+      # Kev's own thresholds, tuned on the 10 training recordings (spikes/tune_kev.py); the SOP's 0.8 suits Jev.
+      SOPVISION_STEP_CONFIDENCE: "0.49"    # right >= 90% of the calls it acts on
+      SOPVISION_DONE_CONFIDENCE: "1.0"     # Kev's "done" peaked at 67% right: steps complete on visual evidence
+      SOPVISION_ANOMALY_CONFIDENCE: "0.53" # just above Kev's highest score on clean runs (0.52)
+    depends_on:
+      kev:
+        condition: service_healthy
+
+volumes:
+  kev-hf-cache:

@@ -24,9 +24,14 @@ def build_questions(sop: SopConfig, active_step_id: str) -> QuestionSet:
 
 
 def build_state(sop: SopConfig, statuses: dict[str, str], scene: SceneState, recent: list[SceneEvent]) -> dict:
-    return {
+    state = {
         "sop": sop.description,
         "steps": [{"id": step_id, "status": status} for step_id, status in statuses.items()],
         "scene": scene.to_jev_dict(),
         "recent_events": [e.describe() for e in recent[-RECENT_EVENTS:]],
     }
+    # Hands are a noisy cue on their own (an operator steadies the chassis with one hand), so a strictly ordered SOP
+    # also names the step its progress says comes next; the model can still disagree when the scene contradicts it.
+    if sop.order == "strict":
+        state["next_expected_step"] = next((s.id for s in sop.steps if statuses.get(s.id) != "done"), None)
+    return state

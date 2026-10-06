@@ -158,6 +158,30 @@ def test_startup_checks_pass_and_return_sops(tmp_repo):
     assert [s.sop for s in startup_checks(settings, GPU)] == ["server_fan_install"]
 
 
+def test_info_names_the_decision_model(tmp_path):
+    with make_client(tmp_path, sopvision_decider_name="Kev") as c:
+        assert c.get("/info").json() == {"decider": "Kev"}
+
+
+async def test_runs_are_told_the_decision_model_name(tmp_path):
+    (tmp_path / "data" / "raw").mkdir(parents=True)
+    (tmp_path / "data" / "raw" / "Install_12.MP4").touch()
+    settings = Settings(sop_data_root=tmp_path / "data", runs_dir=tmp_path / "runs", sopvision_decider_name="Kev")
+    from sopvision.config import list_sops
+
+    contexts = []
+    manager = RunManager(settings, {s.sop: s for s in list_sops(Path("sops"))},
+                         run_factory=lambda ctx, spec: contexts.append(ctx) or FakeRun(ctx, spec))
+    await manager.start("server_fan_install", "test:Install_12")
+    assert contexts[0].decider == "Kev"
+
+
+def test_startup_checks_apply_decision_model_thresholds(tmp_repo):
+    settings, _ = tmp_repo
+    (sop,) = startup_checks(settings.model_copy(update={"sopvision_step_confidence": 0.3}), GPU)
+    assert sop.decisions.step_threshold == 0.3
+
+
 def test_startup_checks_name_the_missing_api_key(tmp_repo):
     settings, _ = tmp_repo
     with pytest.raises(ConfigError, match="TYPESAFE_API_KEY is not set. Add it to .env."):

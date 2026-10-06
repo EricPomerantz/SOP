@@ -211,3 +211,39 @@ def test_ordinary_steps_ignore_touching(sop):
     tr.on_scene(scene_with(0.0, {"fan_bay_1": "installed+touched"}))
     tr.on_scene(scene_with(1.0, {"fan_bay_1": "installed+touched"}))
     assert tr.statuses()["fan_1"] == "done"
+
+
+def thresholds(sop, **kw):
+    return sop.model_copy(update={"decisions": sop.decisions.model_copy(update=kw)})
+
+
+def test_low_step_threshold_activates_without_firing_anomalies(sop):
+    # A model whose step confidence runs low (Kev) gets its own threshold; its anomaly scores keep the default
+    tr = SopTracker(thresholds(sop, step_confidence=0.3))
+    out = []
+    for t in (0.0, 1.0):
+        out += tr.on_decision(decision(t, "fan_1", conf=0.35, anomaly=0.35), S0)
+    assert tr.statuses()["fan_1"] == "active" and alerts(out, "anomaly") == []
+
+
+def test_anomaly_threshold_is_its_own(sop):
+    tr = SopTracker(thresholds(sop, anomaly_confidence=0.95))
+    fired = []
+    for t in (0.0, 1.0, 2.0):
+        fired += tr.on_decision(decision(t, "idle", anomaly=0.9), S0)
+    assert alerts(fired, "anomaly") == []
+
+
+def test_done_threshold_is_its_own(sop):
+    tr = SopTracker(thresholds(sop, done_confidence=0.5))
+    for t in (0.0, 1.0):
+        tr.on_decision(decision(t, "fan_1"), S0)
+    installed = scene_with(2.0, {"fan_bay_1": "installed"})
+    tr.on_decision(decision(2.0, "fan_1", done=0.6), installed)
+    out = tr.on_decision(decision(3.0, "fan_1", done=0.6), installed)
+    assert StepUpdate(3.0, "fan_1", "done", "jev") in out
+
+
+def test_offline_alert_names_the_decision_model(sop):
+    (a,) = SopTracker(sop, decider="Kev").set_jev_online(False, 5.0)
+    assert (a.kind, a.message) == ("jev_offline", "Kev offline — using evidence only")

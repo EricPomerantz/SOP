@@ -12,8 +12,8 @@ import type { RunInfo, RunSnapshot, Sop, SourceSpec, WsMessage } from "./types";
 
 type Props = { api?: Api; connect?: (onMessage: (m: WsMessage) => void) => () => void };
 
-function fromSnapshot(sop: Sop, snap: RunSnapshot): DashboardState {
-  const base = initial(sop.steps);
+function fromSnapshot(sop: Sop, snap: RunSnapshot, decider: string): DashboardState {
+  const base = initial(sop.steps, decider);
   const byId = new Map(snap.steps.map((s) => [s.id, s]));
   return {
     ...base,
@@ -36,16 +36,16 @@ export default function App({ api = httpApi, connect = connectSocket }: Props) {
   const [error, setError] = useState("");
 
   useEffect(() => {
-    Promise.all([api.getSops(), api.getSources(), api.getCurrent()]).then(([sops, srcs, current]) => {
+    Promise.all([api.getSops(), api.getSources(), api.getCurrent(), api.getInfo()]).then(([sops, srcs, current, info]) => {
       const first = sops[0];
       setSop(first);
       setSources(srcs);
       setSelected(current?.source ?? srcs[0]?.id ?? "");
       if (current && first) {
         setRun(current);
-        setState(fromSnapshot(first, current));
+        setState(fromSnapshot(first, current, info.decider));
       } else if (first) {
-        setState(initial(first.steps));
+        setState(initial(first.steps, info.decider));
       }
     }).catch((e) => setError(String(e.message ?? e)));
   }, [api]);
@@ -64,7 +64,7 @@ export default function App({ api = httpApi, connect = connectSocket }: Props) {
   const start = (sourceId: string) => guard(async () => {
     if (!sop) return;
     const info = await api.startRun(sop.id, sourceId);
-    setState(initial(sop.steps));
+    setState((s) => initial(sop.steps, s.decider));
     setRun(info);
     setPaused(false);
     setSpeed(1);
@@ -79,7 +79,7 @@ export default function App({ api = httpApi, connect = connectSocket }: Props) {
         <VideoPanel src={api.videoUrl} running={running} chassisVisible={state.chassisVisible} />
         <Checklist steps={state.steps} decision={state.decision} />
       </div>
-      <JevStrip decision={state.decision} labels={labels} jevOffline={state.jevOffline} />
+      <JevStrip decision={state.decision} labels={labels} jevOffline={state.jevOffline} name={state.decider} />
       <Timeline segments={state.timeline} offSopMarks={state.offSopMarks} elapsed={state.elapsed} labels={labels} />
       <EventLog entries={state.log} />
       <Controls

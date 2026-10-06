@@ -55,16 +55,17 @@ class RunContext:
     runlog: RunLog | None
     broadcast: Callable[[dict], None]
     frames: FrameBuffer
+    decider: str = "Jev"  # the decision model's display name
 
 
 class RunCore:
     """Tracker + logging + broadcast, shared by live and lockstep runs so they behave identically."""
 
     def __init__(self, sop: SopConfig, run_id: str, source_id: str, runlog: RunLog | None,
-                 broadcast: Callable[[dict], None] | None = None):
+                 broadcast: Callable[[dict], None] | None = None, decider: str = "Jev"):
         self.sop, self.run_id, self.runlog = sop, run_id, runlog
         self.broadcast = broadcast or (lambda msg: None)
-        self.tracker = SopTracker(sop)
+        self.tracker = SopTracker(sop, decider)
         self.events: list[RunEvent] = []
         self.alerts: list[Alert] = []
         self.latencies_ms: list[float] = []
@@ -168,7 +169,7 @@ async def run_lockstep(sop: SopConfig, source: VideoSource, detector: Detector, 
 class LiveRun:
     def __init__(self, ctx: RunContext, source: VideoSource, detector: Detector, client):
         self.ctx, self.source, self.detector = ctx, source, detector
-        self.core = RunCore(ctx.sop, ctx.run_id, ctx.source_spec.id, ctx.runlog, ctx.broadcast)
+        self.core = RunCore(ctx.sop, ctx.run_id, ctx.source_spec.id, ctx.runlog, ctx.broadcast, ctx.decider)
         self.builder = SceneBuilder(ctx.sop)
         self.decider = JevDecider(ctx.sop, client, "live", on_decision=self.core.on_decision,
                                   on_status=self.core.on_status)

@@ -72,3 +72,18 @@ def test_anchor_must_be_a_detector_class(tmp_path):
 
 def test_display_name(sop):
     assert sop.name == "Server fan install"
+
+
+def test_answer_thresholds_default_to_accept_confidence(sop):
+    d = sop.decisions
+    assert (d.step_threshold, d.done_threshold, d.anomaly_threshold) == (0.8, 0.8, 0.8)
+    d = d.model_copy(update={"step_confidence": 0.3, "done_confidence": 0.6})
+    assert (d.step_threshold, d.done_threshold, d.anomaly_threshold) == (0.3, 0.6, 0.8)
+
+
+def test_answer_thresholds_are_probabilities():
+    from pydantic import ValidationError
+
+    from sopvision.config import DecisionSpec
+    with pytest.raises(ValidationError):
+        DecisionSpec(step_confidence=1.5)

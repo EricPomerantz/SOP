@@ -162,3 +162,11 @@ async def test_processing_error_ends_the_run_with_an_alert(sop, tmp_path):
     assert [a["kind"] for a in alerts] == ["pipeline_error"]
     assert alerts[0]["message"] == "Processing failed: CUDA error: out of memory"
     assert read_events(tmp_path / "run.jsonl")[-1].type == "run_summary"
+
+
+def test_live_run_names_its_decision_model(sop, tmp_path):
+    ctx = RunContext("run1", sop, SourceSpec(id="test:x", kind="file", label="x"), RunLog(tmp_path / "run.jsonl"),
+                     lambda m: None, FrameBuffer(), decider="Kev")
+    run = LiveRun(ctx, object(), object(), object())
+    (alert,) = run.core.tracker.set_jev_online(False, 1.0)
+    assert alert.message == "Kev offline — using evidence only"

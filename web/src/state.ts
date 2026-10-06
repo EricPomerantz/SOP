@@ -20,12 +20,14 @@ export type DashboardState = {
   jevOffline: boolean;
   chassisVisible: boolean;
   ended: boolean;
+  decider: string;  // the decision model's name, for labels
 };
 
 const MAX_LOG = 200;
-const SOURCE_NAMES: Record<string, string> = { jev: "Jev", evidence: "evidence" };
+// "jev" is the source id for whichever decision model is in use; its display name lives in the state.
+const sourceName = (source: string | null, decider: string) => (source === "jev" ? decider : source ?? "");
 
-export function initial(steps: { id: string; label: string }[]): DashboardState {
+export function initial(steps: { id: string; label: string }[], decider = "Jev"): DashboardState {
   return {
     steps: steps.map((s) => ({ ...s, status: "pending", duration: null, source: null })),
     log: [],
@@ -36,6 +38,7 @@ export function initial(steps: { id: string; label: string }[]): DashboardState 
     jevOffline: false,
     chassisVisible: true,
     ended: false,
+    decider,
   };
 }
 
@@ -75,7 +78,7 @@ export function reduce(state: DashboardState, msg: WsMessage): DashboardState {
           : timeline;
       }
       if (msg.status === "done") {
-        log = withLog(log, { t: msg.t, level: "step", text: `${label} complete · by ${SOURCE_NAMES[msg.source ?? ""] ?? msg.source}` });
+        log = withLog(log, { t: msg.t, level: "step", text: `${label} complete · by ${sourceName(msg.source, state.decider)}` });
       }
       return { ...state, elapsed, steps, timeline, log };
     }

@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, ValidationError, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 
 class ConfigError(Exception):
@@ -45,9 +45,26 @@ class DetectorSpec(_Model):
 
 class DecisionSpec(_Model):
     accept_confidence: float = 0.8
+    # Per-answer thresholds, each defaulting to accept_confidence. Decision models' scales differ (Kev's step
+    # confidence runs far below Jev's), so a model's own values usually come from Settings, not the SOP file.
+    step_confidence: float | None = Field(default=None, ge=0, le=1)     # current step: activate it, or warn off-SOP
+    done_confidence: float | None = Field(default=None, ge=0, le=1)     # "active step done" (still needs evidence)
+    anomaly_confidence: float | None = Field(default=None, ge=0, le=1)  # anomaly warning
     hold_seconds: float = 1.0
     evidence_only_after: float = 3.0
     hands_off_seconds: float = 0.5
+
+    @property
+    def step_threshold(self) -> float:
+        return self.accept_confidence if self.step_confidence is None else self.step_confidence
+
+    @property
+    def done_threshold(self) -> float:
+        return self.accept_confidence if self.done_confidence is None else self.done_confidence
+
+    @property
+    def anomaly_threshold(self) -> float:
+        return self.accept_confidence if self.anomaly_confidence is None else self.anomaly_confidence
 
 
 class SopConfig(_Model):
