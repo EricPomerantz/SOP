@@ -183,3 +183,17 @@ def test_back_to_back_runs_get_their_own_ids_and_logs(client):
 
 def test_sops_carry_a_display_name(client):
     assert client.get("/sops").json()[0]["name"] == "Server fan install"
+
+
+def test_run_info_names_the_deciding_model(tmp_path):
+    with make_client(tmp_path, decision_mode="laya") as c:
+        info = start(c).json()
+        assert info["decision_model"] == "laya"
+        assert c.get("/runs/current").json()["decision_model"] == "laya"
+    with make_client(tmp_path / "b", decision_mode="compare") as c:
+        assert start(c).json()["decision_model"] == "jev"  # compare: Jev drives the tracker
+
+
+def test_config_names_the_deciding_model_before_any_run(tmp_path):
+    with make_client(tmp_path, decision_mode="laya") as c:
+        assert c.get("/config").json() == {"decision_model": "laya", "decision_mode": "laya"}

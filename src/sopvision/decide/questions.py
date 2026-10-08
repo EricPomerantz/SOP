@@ -30,3 +30,38 @@ def build_state(sop: SopConfig, statuses: dict[str, str], scene: SceneState, rec
         "scene": scene.to_jev_dict(),
         "recent_events": [e.describe() for e in recent[-RECENT_EVENTS:]],
     }
+
+
+def eligible_steps(sop: SopConfig, statuses: dict[str, str]) -> list[str]:
+    """Steps not done yet whose prerequisites (per the SOP's order rules) are all done: what may happen next."""
+    done = {s for s, status in statuses.items() if status == "done"}
+    return [s.id for s in sop.steps if s.id not in done and sop.must_precede(s.id) <= done]
+
+
+def progress(sop: SopConfig, statuses: dict[str, str], done_t: dict[str, float], t: float) -> dict:
+    """What the tracker knows about where the run is (experiment A1): the step(s) it expects next and the
+    last step it confirmed, with how long ago."""
+    eligible = eligible_steps(sop, statuses)
+    last = max(((done_t[s], s) for s, status in statuses.items() if status == "done" and s in done_t), default=None)
+    out: dict = {"expected_step": eligible[0]} if len(eligible) == 1 else {"expected_steps": eligible}
+    out["last_completed"] = None if last is None else {"step": last[1], "seconds_ago": round(t - last[0], 1)}
+    return out
+
+
+def with_progress(state: dict, prog: dict) -> dict:
+    """The state with `progress` placed right after the step list."""
+    out = {}
+    for key, value in state.items():
+        out[key] = value
+        if key == "steps":
+            out["progress"] = prog
+    return out
+
+
+def wire_questions(qs: QuestionSet) -> dict:
+    """The questions exactly as JevClient sends them on the wire (training data must match serving)."""
+    from typesafe_sdk import Choice, Noul
+
+    return {"current_step": Choice(instructions=CURRENT_STEP_QUESTION, criteria=qs.current_step_options).model_dump(),
+            "active_step_done": Noul(instructions=qs.active_step_question).model_dump(),
+            "anomaly": Noul(instructions=ANOMALY_QUESTION).model_dump()}

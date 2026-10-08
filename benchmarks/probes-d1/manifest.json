@@ -1,0 +1,15 @@
+{
+  "requests": 140,
+  "by_probe": {
+    "out_of_order_work": 40,
+    "out_of_order_install": 30,
+    "idle_bench": 40,
+    "done_part_removed": 30
+  },
+  "seed": 0,
+  "derived_from": "benchmarks/sop-244",
+  "sha256": {
+    "requests.jsonl": "99a09195c3e42467d53b7b5703603ea49bd2299c76d0b0c05ef0a473b02ee480"
+  },
+  "note": "Synthetic deviation probes for evaluation only. Never train on them."
+}

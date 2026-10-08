@@ -8,12 +8,20 @@ services:
     environment:
       SOP_DATA_ROOT: /data/server_fan
       SOPVISION_IN_CONTAINER: "1"
+      DECISION_MODE: ${DECISION_MODE:-jev}  # from the shell or .env: jev | decider | laya | compare
+      COMPARE_SHADOW: ${COMPARE_SHADOW:-decider}  # compare mode's shadow model: decider | laya
+      DECIDER_URL: http://decider:8001
+      LAYA_URL: http://laya:8000
     volumes:
       - ${SOP_DATASET_DIR:-./sop-sample-training-data}:/data:ro
+      - ./src:/app/src:ro
+      - ./scripts:/app/scripts:ro
+      - ./benchmarks:/app/benchmarks  # frozen decision benchmarks (written once by scripts/freeze_benchmark.py)
       - ./models:/app/models:ro
       - ./runs:/app/runs
       - ./sops:/app/sops:ro
       - ./data/scenarios:/app/data/scenarios:ro
+      - ./data/training:/app/data/training  # fine-tuning captures and datasets (scripts/capture_requests.py)
     deploy:
       resources:
         reservations:
@@ -21,3 +29,106 @@ services:
             - driver: nvidia
               count: all
               capabilities: [gpu]
+
+  # Unit tests in Docker: `docker compose --profile test run --rm tests` (add pytest args after `tests`).
+  tests:
+    profiles: [test]
+    build:
+      context: .
+      target: test
+    image: sopvision:test
+    environment:
+      DECIDER_URL: http://decider:8001  # for `-m decider` (the Decider service must be up)
+    volumes:
+      - ./src:/app/src:ro
+      - ./tests:/app/tests:ro
+      - ./training:/app/training:ro
+      - ./scripts:/app/scripts:ro
+      - ./sops:/app/sops:ro
+      - ./pyproject.toml:/app/pyproject.toml:ro
+
+  # Local Decider (Mapika/decider-4b): `docker compose --profile decider up -d decider`.
+  # Not a dependency of sopvision on purpose: DECISION_MODE=jev must keep working when it is down.
+  decider:
+    profiles: [decider]
+    build:
+      context: .
+      dockerfile: docker/decider.Dockerfile
+      additional_contexts:
+        certs: ${CORP_CA_DIR:-./docker/certs}
+    image: sopvision-decider:latest
+    ports:
+      - "8001:8001"
+    environment:
+      DECIDER_REPO: Mapika/decider-4b
+      DECIDER_REVISION: ${DECIDER_REVISION:-eb5fbdfc9448473ec25e399882912863afbdb70e}
+      # VRAM: our requests are ~0.5-1k tokens per question row, so capture CUDA graphs for small shapes only
+      # (the defaults go to 8192 tokens x batch 32). Longer rows still work, eagerly.
+      DECIDER_T_BUCKETS: 64,128,256,512,768,1024,1536,2048
+      DECIDER_B_BUCKETS: 1,2,4
+      DECIDER_GRAPH_TOKEN_BUDGET: "8192"
+      DECIDER_SHARED_FORK_GB: "1"
+      # Requests whose shortest question row has at least this many tokens run the state once and fork it per
+      # question instead of once per question (server default 768; our rows are ~700-1000 tokens).
+      DECIDER_SHARED_MIN_TOKENS: ${DECIDER_SHARED_MIN_TOKENS:-768}
+      DECIDER_MAX_STATE_TOKENS: "4096"
+      DECIDER_MAX_BATCH: "4"
+    volumes:
+      - hf_cache:/cache  # weights (HF_HOME) and compiled Triton kernels survive restarts and rebuilds
+      - ./data:/app/data:ro  # recordings' frames for the vision smoke test
+      - ./scripts:/app/scripts:ro
+      - ${SOP_DATASET_DIR:-./sop-sample-training-data}:/dataset:ro
+    healthcheck:
+      # /health answers only after the model is loaded and graphs are captured; the app also runs a real probe.
+      test: ["CMD", "python", "-c", "import json,urllib.request,sys; sys.exit(0 if json.load(urllib.request.urlopen('http://localhost:8001/health'))['ok'] else 1)"]
+      interval: 15s
+      timeout: 5s
+      start_period: 900s  # first start downloads 8.4 GB
+      retries: 3
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  # Laya (convaiinnovations/laya, 421M): `docker compose --profile laya up -d laya`. Evaluation only so far.
+  laya:
+    profiles: [laya]
+    build:
+      context: .
+      dockerfile: docker/laya.Dockerfile
+      additional_contexts:
+        certs: ${CORP_CA_DIR:-./docker/certs}
+    image: sopvision-laya:latest
+    ports:
+      - "8002:8000"
+    environment:
+      LAYA_DEVICE: cuda
+      LAYA_PRELOAD: "1"
+      LAYA_MODELS: english,typed-decisions
+      LAYA_MAX_LOADED: "2"
+      LAYA_REVISION: reviewed  # the commit SHAs this laya release pins (laya/revisions.py)
+      LAYA_MAX_TOKEN_BUDGET: "4096"
+      # A fine-tune to serve in place of the shipped English checkpoint, e.g. /data/models/laya-sop-v1 (empty = shipped)
+      LAYA_CHECKPOINT: ${LAYA_CHECKPOINT:-}
+    volumes:
+      - hf_cache:/cache
+      - ./data/training/models:/data/models:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 15s
+      timeout: 5s
+      start_period: 600s
+      retries: 3
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+volumes:
+  hf_cache:

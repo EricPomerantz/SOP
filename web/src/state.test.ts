@@ -47,3 +47,14 @@ test("scene without chassis shows the banner flag and advances the clock", () =>
   expect(s.chassisVisible).toBe(false);
   expect(s.elapsed).toBe(12.5);
 });
+
+test("the deciding model names the strip and the completion source", () => {
+  let s = initial(STEPS, "laya");
+  expect(s.model).toBe("laya");
+  s = reduce(s, { type: "step_update", t: 9.1, step_id: "fan_1", status: "done", source: "jev", duration: 9.1 });
+  expect(s.log[0].text).toBe("Fan 1 complete · by Laya");
+  s = reduce(s, { type: "decision", t: 10, current_step: "fan_2", confidence: 0.9, active_step_id: "fan_2",
+                  active_step_done: 0.1, anomaly: 0, off_sop: 0, latency_ms: 85, provider: "decider" });
+  expect(s.model).toBe("decider");
+  expect(s.decision?.provider).toBe("decider");
+});

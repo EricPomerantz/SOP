@@ -86,3 +86,12 @@ async def test_slow_call_times_out_and_is_retried():
     with pytest.raises(JevUnavailableError, match="timed out"):
         await JevClient("k", sdk=sdk, timeout=0.01, sleep=lambda s: asyncio.sleep(0)).ask({}, QS)
     assert len(sdk.calls) == 3
+
+
+async def test_wire_questions_match_what_the_client_sends():
+    from sopvision.decide.questions import wire_questions
+
+    sdk = ReplaySdk()
+    await JevClient("k", sdk=sdk).ask({}, QS)
+    sent = {k: v.model_dump() for k, v in sdk.calls[0].items()}
+    assert sent == wire_questions(QS)

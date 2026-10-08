@@ -110,8 +110,9 @@ class SopTracker:
                 self._removed_since.pop(sid, None)
         return out
 
-    def set_jev_online(self, online: bool, t: float) -> list[Alert]:
-        return [] if online else [Alert(t, "warning", "jev_offline", "Jev offline — using evidence only")]
+    def set_jev_online(self, online: bool, t: float, model: str = "Jev") -> list[Alert]:
+        """The deciding model (Jev, or a local one) went offline. The kind stays `jev_offline` for every model."""
+        return [] if online else [Alert(t, "warning", "jev_offline", f"{model} offline — using evidence only")]
 
     def end_run(self, t: float) -> list[Alert]:
         missing = [s for s in self.order if self._steps[s].status != "done"]

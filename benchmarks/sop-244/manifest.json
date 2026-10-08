@@ -1,0 +1,12 @@
+{
+  "requests": 244,
+  "labelled_current_step": 192,
+  "sha256": {
+    "requests.jsonl": "9f9f50f9ea0f7e2206ec8b99ac226bff6b952e5eff169ea6b5e2ad9ea03d71b5"
+  },
+  "sources": {
+    "runs/eval-compare.test-Install_12.jsonl": "651c1e410530245a1ce6ff9f0071dfd2ff2afde745d6f92ef00e691e0fdd82d7",
+    "runs/eval-compare.test-Install_13.jsonl": "2d69aaa6747b81bb12ba0f19f1c1ea58dc0ad226d6e22e0212b0f5808df3ad68"
+  },
+  "note": "Frozen evaluation set. Never train on it, never rewrite it; runs 12-13 are excluded from training data."
+}

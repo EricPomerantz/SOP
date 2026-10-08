@@ -28,6 +28,21 @@ sopvision = "sopvision.cli:app"
 [dependency-groups]
 dev = ["pytest", "pytest-asyncio"]
 training = ["transformers", "accelerate", "pillow"]
+# The local Decider service (docker/decider.Dockerfile): Mapika/decider-4b over HTTP, decider-2b-vision smoke test.
+decider = [
+    "torch",
+    "transformers>=5",
+    "flash-linear-attention",
+    "huggingface-hub",
+    "numpy",
+    "jinja2",
+    "fastapi",
+    "uvicorn[standard]",
+    "httpx",
+    "pillow",
+    "torchvision",
+    "opencv-python-headless",
+]
 
 [build-system]
 requires = ["hatchling"]
@@ -53,6 +68,7 @@ markers = [
     "jev: calls the real Jev API",
     "slow: long-running",
     "dataset: needs the server_fan dataset",
+    "decider: calls the local Decider service (docker compose --profile decider)",
 ]
-addopts = "-m 'not gpu and not jev' --import-mode=importlib"
+addopts = "-m 'not gpu and not jev and not decider' --import-mode=importlib"
 pythonpath = ["."]

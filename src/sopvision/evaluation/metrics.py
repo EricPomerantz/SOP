@@ -25,6 +25,7 @@ class EvalVideo(BaseModel):
     offsop_jev_answers: list[int] = []  # per off-SOP segment: Jev answers offsop_clean judged (0 → its Jev check is vacuous)
     latency_ms: dict[str, float]
     expected_alerts: list[dict] = []  # scenario videos: what they must raise
+    decisions: dict | None = None  # DECISION_MODE=compare: Jev vs Decider summary (evaluation/decisions.py)
 
 
 class EvalReport(BaseModel):

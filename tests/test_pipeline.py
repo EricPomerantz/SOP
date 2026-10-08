@@ -162,3 +162,19 @@ async def test_processing_error_ends_the_run_with_an_alert(sop, tmp_path):
     assert [a["kind"] for a in alerts] == ["pipeline_error"]
     assert alerts[0]["message"] == "Processing failed: CUDA error: out of memory"
     assert read_events(tmp_path / "run.jsonl")[-1].type == "run_summary"
+
+
+
+def test_decisions_and_offline_alerts_name_the_deciding_model(sop):
+    from sopvision.decide.types import Decision
+    from sopvision.pipeline import RunCore
+    from sopvision.scene.types import SceneState
+
+    sent = []
+    core = RunCore(sop, "r", "file", None, sent.append, model="Laya")
+    core.last_scene = SceneState(1, 1.0, True, 0.9, {}, [], [], None)
+    core.on_decision(Decision(1, 1.0, "fan_1", JevAnswers("fan_1", 0.9, {"fan_1": 0.9}, 0.1, 0.0, 80.0, "laya")))
+    (msg,) = [m for m in sent if m["type"] == "decision"]
+    assert msg["provider"] == "laya"
+    core.on_status("offline", 2.0)
+    assert any(m["type"] == "alert" and m["message"] == "Laya offline — using evidence only" for m in sent)

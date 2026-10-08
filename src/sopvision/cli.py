@@ -136,6 +136,19 @@ def doctor() -> None:
         typer.echo(str(e), err=True)
         raise typer.Exit(1)
 
+    from sopvision.decide.providers import local_provider, local_readiness
+    from sopvision.settings import Settings
+
+    settings = Settings()
+    typer.echo(f"decision_mode: {settings.decision_mode}")
+    provider = local_provider(settings)
+    if provider:
+        r = local_readiness(settings, provider)
+        typer.echo(f"{provider}: running={r.running} model_loaded={r.model_loaded} gpu={r.gpu} inference={r.inference} "
+                   f"({r.detail})")
+        if not r.ready and settings.decision_mode != "compare":
+            raise typer.Exit(1)
+
 
 @app.command("make-scenarios")
 def make_scenarios(run: int = typer.Option(12, help="Recording to build the scenarios from"),

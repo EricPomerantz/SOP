@@ -1,7 +1,7 @@
 """Environment settings, read from the process environment and `.env`."""
 
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
@@ -16,6 +16,17 @@ class Settings(BaseSettings):
     # Optional Vercel AI Gateway routing; the names match what typesafe-sdk itself reads.
     typesafe_base_url: str | None = None
     typesafe_model: str | None = Field(default=None, validation_alias="TYPESAFE_DEFAULT_MODEL")
+    # Who answers SOP decisions: jev (default), decider or laya (local models), or compare (Jev decides, the
+    # compare_shadow model gets the same requests and both answers are logged).
+    decision_mode: Literal["jev", "decider", "laya", "compare"] = "jev"
+    compare_shadow: Literal["decider", "laya"] = "decider"
+    decider_url: str = "http://localhost:8001"
+    decider_timeout: float = 5.0
+    # Laya (convaiinnovations/laya), a 421M decision model behind the same wire format; evaluation only so far.
+    laya_url: str = "http://localhost:8002"
+    laya_model: str = "english"  # english | multilingual | typed-decisions
+    laya_max_len: int | None = None  # token budgets; None = the checkpoint's own (english 512 / 192)
+    laya_head_max_len: int | None = None
     sop_data_root: Path = Path("sop-sample-training-data/server_fan")
     sopvision_in_container: bool = False
     sopvision_rtsp_urls: Annotated[list[str], NoDecode] = []

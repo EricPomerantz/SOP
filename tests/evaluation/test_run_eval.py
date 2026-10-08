@@ -28,7 +28,7 @@ def test_video_from_result_scores_steps_and_off_sop():
     assert v.offsop_jev_answers == [0, 1]  # the 0.5 s answer is inside the opening segment's grace
     assert v.alerts[1]["data"] == {"missing": ["cover"]}
     assert v.frames[1] == {"t": 0.033, "slots": {"fan_bay_1": "installed"}}
-    assert v.latency_ms == {"p50": 200.0, "p90": 300.0, "max": 300.0}
+    assert v.latency_ms == {"p50": 200.0, "p90": 300.0, "p95": 300.0, "max": 300.0}
 
 
 def test_scenario_video_has_no_ground_truth():
@@ -38,7 +38,7 @@ def test_scenario_video_has_no_ground_truth():
 
 
 def test_latency_stats_empty():
-    assert latency_stats([]) == {"p50": 0.0, "p90": 0.0, "max": 0.0}
+    assert latency_stats([]) == {"p50": 0.0, "p90": 0.0, "p95": 0.0, "max": 0.0}
 
 
 def test_summary_says_how_steps_completed_and_how_much_jev_answered_off_sop():

@@ -9,24 +9,27 @@ from typing import Literal
 
 from sopvision.config import SopConfig
 from sopvision.dataset import RunIndex, load_index
+from sopvision.evaluation.decisions import label, summarize, summary_text
 from sopvision.evaluation.metrics import (EvalReport, EvalVideo, check_acceptance, offsop_clean, offsop_jev_answers,
                                          step_errors)
 from sopvision.pipeline import LockstepResult, run_lockstep
 from sopvision.settings import Settings
 from sopvision.sources.file import FileSource
+from sopvision.storage.runlog import RunLog
 
 TEST_RUNS = (12, 13)
 
 
 def latency_stats(ms: list[float]) -> dict[str, float]:
     if not ms:
-        return {"p50": 0.0, "p90": 0.0, "max": 0.0}
+        return {"p50": 0.0, "p90": 0.0, "p95": 0.0, "max": 0.0}
     s = sorted(ms)
-    return {"p50": s[len(s) // 2], "p90": s[min(len(s) - 1, math.ceil(0.9 * len(s)) - 1)], "max": s[-1]}
+    return {"p50": s[len(s) // 2], "p90": s[min(len(s) - 1, math.ceil(0.9 * len(s)) - 1)],
+            "p95": s[min(len(s) - 1, math.ceil(0.95 * len(s)) - 1)], "max": s[-1]}
 
 
 def video_from_result(vid: str, kind: Literal["test", "scenario"], res: LockstepResult, run: RunIndex | None,
-                      expected: list[dict]) -> EvalVideo:
+                      expected: list[dict], accept: float = 0.8) -> EvalVideo:
     errors = {k: None if e is None else round(e, 3) for k, e in (step_errors(run.segments, res.steps) if run else {}).items()}
     steps = {s.id: {"status": s.status, "done_t": s.done_t, "error": errors.get(s.id), "source": s.source}
              for s in res.steps}
@@ -36,10 +39,17 @@ def video_from_result(vid: str, kind: Literal["test", "scenario"], res: Lockstep
         frames=[{"t": round(f.t, 3), "slots": f.slots} for f in res.frames],
         offsop=offsop_clean(run.segments, res.steps, res.decisions) if run else [],
         offsop_jev_answers=offsop_jev_answers(run.segments, res.decisions) if run else [],
-        latency_ms=latency_stats(res.latencies_ms), expected_alerts=expected)
+        latency_ms=latency_stats(res.latencies_ms), expected_alerts=expected,
+        decisions=summarize([label(r, run.segments if run else None, kind == "test", vid) for r in res.comparisons], accept)
+        if res.comparisons else None)
 
 
-async def _run_all(settings: Settings, sop: SopConfig, detector, client, progress) -> list[EvalVideo]:
+def _log_path(out: Path, vid: str) -> Path:
+    return out.parent / f"{out.stem}.{vid.replace(':', '-')}.jsonl"
+
+
+async def _run_all(settings: Settings, sop: SopConfig, detector, client, progress, shadow=None,
+                   out: Path | None = None) -> list[EvalVideo]:
     index = {r.run: r for r in load_index(settings.sop_data_root)}
     jobs: list[tuple[str, Literal["test", "scenario"], Path, RunIndex | None, list[dict]]] = [
         (f"test:Install_{n}", "test", index[n].raw_path, index[n], []) for n in TEST_RUNS]
@@ -50,26 +60,34 @@ async def _run_all(settings: Settings, sop: SopConfig, detector, client, progres
     for vid, kind, path, run, expected in jobs:
         progress(f"evaluating {vid} …")
         detector.reset()
-        res = await run_lockstep(sop, FileSource(path, mode="lockstep"), detector, client, run_id="eval", source_id=vid)
-        videos.append(video_from_result(vid, kind, res, run, expected))
+        runlog = None
+        if out is not None and settings.decision_mode != "jev":  # per-video logs carry the replayable requests
+            log_path = _log_path(out, vid)
+            log_path.unlink(missing_ok=True)
+            runlog = RunLog(log_path)
+        res = await run_lockstep(sop, FileSource(path, mode="lockstep"), detector, client, runlog=runlog, run_id="eval",
+                                 source_id=vid, shadow=shadow)
+        videos.append(video_from_result(vid, kind, res, run, expected, sop.decisions.accept_confidence))
     return videos
 
 
 def run_eval(settings: Settings, sop: SopConfig, out: Path, env: dict, progress=print) -> EvalReport:
-    from sopvision.decide.jev_client import JevClient
+    from sopvision.decide.providers import clients_for
     from sopvision.perception.detector import YoloDetector
 
     detector = YoloDetector(sop.detector.weights, sop.detector.classes)
 
     async def main():
-        client = JevClient(settings.typesafe_api_key.get_secret_value(), settings.typesafe_base_url, settings.typesafe_model)
+        client, shadow = clients_for(settings)
         try:
-            return await _run_all(settings, sop, detector, client, progress)
+            return await _run_all(settings, sop, detector, client, progress, shadow, out)
         finally:
             await client.aclose()
+            if shadow is not None:
+                await shadow.aclose()
 
     videos = asyncio.run(main())
-    report = EvalReport(env=env, videos=videos, acceptance={}, passed=False)
+    report = EvalReport(env=env | {"decision_mode": settings.decision_mode}, videos=videos, acceptance={}, passed=False)
     acceptance = check_acceptance(report)
     report = report.model_copy(update={"acceptance": acceptance, "passed": all(acceptance.values())})
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -79,9 +97,10 @@ def run_eval(settings: Settings, sop: SopConfig, out: Path, env: dict, progress=
 
 def summary_lines(report: EvalReport) -> list[str]:
     tests = [v for v in report.videos if v.kind == "test"]
+    provider = "Decider" if report.env.get("decision_mode") == "decider" else "Jev"
     errors = [abs(s["error"]) for v in tests for s in v.steps.values() if s["error"] is not None]
     lines = [f"{v.id}: {sum(s['status'] == 'done' for s in v.steps.values())}/{len(v.steps)} steps, "
-             f"alerts {sorted({a['kind'] for a in v.alerts})}, Jev p50 {v.latency_ms['p50']:.0f} ms" for v in report.videos]
+             f"alerts {sorted({a['kind'] for a in v.alerts})}, {provider} p50 {v.latency_ms['p50']:.0f} ms" for v in report.videos]
     sources = [s["source"] for v in tests for s in v.steps.values() if s["status"] == "done"]
     lines.append(f"test-run completions: visual evidence {sources.count('evidence')}, Jev {sources.count('jev')}")
     answers = [n for v in tests for n in v.offsop_jev_answers]
@@ -91,6 +110,9 @@ def summary_lines(report: EvalReport) -> list[str]:
                      "c3's Jev check is vacuous there")
     if errors:
         lines.append(f"step timing error: median {sorted(errors)[len(errors) // 2]:.2f} s, max {max(errors):.2f} s")
+    for v in report.videos:
+        if v.decisions:
+            lines += [f"{v.id} decisions: {line}" for line in summary_text(v.decisions)]
     names = {"c1": "all steps done in order", "c2": "timing within 2 s median / 4 s max", "c3": "off-SOP segments: idle/off-SOP, no step progress",
              "c4": "no violations on clean runs", "c5": "scenarios raise expected alerts"}
     lines += [f"{'PASS' if ok else 'FAIL'}  {k}: {names[k]}" for k, ok in report.acceptance.items()]

@@ -2,6 +2,11 @@
 sop-sample-training-data/
 *.tar.gz
 
+# Model weights (YOLO checkpoints; Decider weights live in the hf_cache Docker volume)
+weights/
+*.pt
+*.safetensors
+
 # Generated artifacts
 models/
 runs/
@@ -11,7 +16,7 @@ data/
 .env
 
 # Python
-.venv/
+.venv*/
 __pycache__/
 *.pyc
 .pytest_cache/
@@ -19,3 +24,7 @@ __pycache__/
 # Frontend
 node_modules/
 web/dist/
+
+# Local corporate CA certs for Docker builds (docker/decider.Dockerfile)
+docker/certs/*
+!docker/certs/.gitkeep

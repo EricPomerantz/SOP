@@ -22,7 +22,8 @@ STATE_COLOURS = {"installed": INSTALLED, "empty": EMPTY, "occluded": UNSURE, "un
 class OverlayStats:
     fps: float
     det_ms: float
-    jev_ms: float | None
+    jev_ms: float | None  # the deciding model's last request time
+    model: str = "Jev"
 
 
 def _dashed_rect(img, box, colour, thickness, dash):
@@ -65,6 +66,6 @@ def draw_overlay(image: np.ndarray, scene: SceneState, detections: list[Detectio
         cv2.putText(out, "held: " + ", ".join(scene.held), (10 * unit, h - 26 * unit), cv2.FONT_HERSHEY_SIMPLEX, font,
                     HAND, unit)
     jev = "-" if stats.jev_ms is None else f"{stats.jev_ms:.0f} ms"
-    footer = f"{stats.fps:.0f} fps  YOLO {stats.det_ms:.0f} ms  Jev {jev}"
+    footer = f"{stats.fps:.0f} fps  YOLO {stats.det_ms:.0f} ms  {stats.model} {jev}"
     cv2.putText(out, footer, (10 * unit, h - 8 * unit), cv2.FONT_HERSHEY_SIMPLEX, font, WHITE, unit)
     return out

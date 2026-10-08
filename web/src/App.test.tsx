@@ -11,8 +11,9 @@ const SOP: Sop = {
 };
 const RUNNING: RunSnapshot = { run_id: "r1", sop: SOP.id, source: "test:Install_12", steps: [], alerts: [], last_decision: null };
 
-function fakeApi(current: RunSnapshot | null): Api {
+function fakeApi(current: RunSnapshot | null, model?: string): Api {
   return {
+    ...(model ? { getConfig: async () => ({ decision_model: model, decision_mode: model }) } : {}),
     getSops: async () => [SOP],
     getSources: async () => [{ id: "test:Install_12", kind: "file", label: "Install_12 (test run)" }],
     getCurrent: async () => current,
@@ -65,4 +66,11 @@ test("with no run in progress it offers sources to start one", async () => {
 test("the top bar shows the SOP's own name", async () => {
   render(<App api={fakeApi(null)} connect={fakeSocket().connect} />);
   expect(await screen.findByText("Bench assembly")).toBeInTheDocument();
+});
+
+
+test("before any run the strip names the configured model, not Jev", async () => {
+  render(<App api={fakeApi(null, "laya")} connect={fakeSocket().connect} />);
+  expect(await screen.findByLabelText("Laya now")).toHaveTextContent("Waiting for the first decision");
+  expect(screen.queryByLabelText("Jev now")).toBeNull();
 });

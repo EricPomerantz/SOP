@@ -1,10 +1,11 @@
+import { modelName } from "./format";
 import type { AlertMsg, DecisionMsg, StepStatus, WsMessage } from "./types";
 
 export type StepView = { id: string; label: string; status: StepStatus; duration: number | null; source: string | null };
 export type LogEntry = { t: number; level: AlertMsg["level"] | "step"; text: string };
 export type DecisionView = {
   t: number; currentStep: string; confidence: number; activeStepId: string; activeStepDone: number;
-  anomaly: number; offSop: number; latencyMs: number;
+  anomaly: number; offSop: number; latencyMs: number; provider: string;
 };
 export type Segment = { stepId: string; start: number; end?: number };
 export type RunStatus = "On track" | "Deviation" | "Incomplete";
@@ -17,15 +18,18 @@ export type DashboardState = {
   elapsed: number;
   timeline: Segment[];
   offSopMarks: number[];
-  jevOffline: boolean;
+  jevOffline: boolean; // the deciding model is offline (the alert kind is jev_offline for every model)
+  model: string; // the deciding model: jev | decider | laya
   chassisVisible: boolean;
   ended: boolean;
 };
 
 const MAX_LOG = 200;
-const SOURCE_NAMES: Record<string, string> = { jev: "Jev", evidence: "evidence" };
+// A step's source "jev" means "confirmed by the deciding model", whichever model that is.
+const sourceName = (source: string | null, model: string) =>
+  source === "jev" ? modelName(model) : source === "evidence" ? "evidence" : source;
 
-export function initial(steps: { id: string; label: string }[]): DashboardState {
+export function initial(steps: { id: string; label: string }[], model = "jev"): DashboardState {
   return {
     steps: steps.map((s) => ({ ...s, status: "pending", duration: null, source: null })),
     log: [],
@@ -34,6 +38,7 @@ export function initial(steps: { id: string; label: string }[]): DashboardState 
     timeline: [],
     offSopMarks: [],
     jevOffline: false,
+    model,
     chassisVisible: true,
     ended: false,
   };
@@ -43,6 +48,7 @@ export function decisionView(m: DecisionMsg): DecisionView {
   return {
     t: m.t, currentStep: m.current_step, confidence: m.confidence, activeStepId: m.active_step_id,
     activeStepDone: m.active_step_done, anomaly: m.anomaly, offSop: m.off_sop, latencyMs: m.latency_ms,
+    provider: m.provider ?? "jev",
   };
 }
 
@@ -59,7 +65,7 @@ export function reduce(state: DashboardState, msg: WsMessage): DashboardState {
     case "scene":
       return { ...state, elapsed, chassisVisible: msg.scene.chassis.visible };
     case "decision":
-      return { ...state, elapsed, decision: decisionView(msg), jevOffline: false };
+      return { ...state, elapsed, decision: decisionView(msg), jevOffline: false, model: msg.provider ?? state.model };
     case "step_update": {
       const label = state.steps.find((s) => s.id === msg.step_id)?.label ?? msg.step_id;
       const steps = state.steps.map((s) =>
@@ -75,7 +81,7 @@ export function reduce(state: DashboardState, msg: WsMessage): DashboardState {
           : timeline;
       }
       if (msg.status === "done") {
-        log = withLog(log, { t: msg.t, level: "step", text: `${label} complete · by ${SOURCE_NAMES[msg.source ?? ""] ?? msg.source}` });
+        log = withLog(log, { t: msg.t, level: "step", text: `${label} complete · by ${sourceName(msg.source, state.model)}` });
       }
       return { ...state, elapsed, steps, timeline, log };
     }

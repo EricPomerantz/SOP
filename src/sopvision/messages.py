@@ -21,6 +21,7 @@ class DecisionMsg(BaseModel):
     anomaly: float
     off_sop: float  # Jev's probability that the current activity is off-SOP
     latency_ms: float
+    provider: str = "jev"  # which model answered: jev | decider | laya
 
 
 class StepUpdateMsg(BaseModel):

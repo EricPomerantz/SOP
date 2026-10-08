@@ -4,10 +4,11 @@ sop-sample-training-data/
 models/
 runs/
 data/
-.venv/
+.venv*/
 **/node_modules/
 .env
 .git/
 web/dist/
 .superpowers/
-spikes/
+weights/
+*.pt

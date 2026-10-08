@@ -1,9 +1,10 @@
-import type { RunInfo, RunSnapshot, Sop, SourceSpec, WsMessage } from "./types";
+import type { AppConfig, RunInfo, RunSnapshot, Sop, SourceSpec, WsMessage } from "./types";
 
 export type Api = {
   getSops(): Promise<Sop[]>;
   getSources(): Promise<SourceSpec[]>;
   getCurrent(): Promise<RunSnapshot | null>;
+  getConfig?(): Promise<AppConfig>;
   startRun(sop: string, sourceId: string): Promise<RunInfo>;
   stopRun(runId: string): Promise<void>;
   control(runId: string, action?: "pause" | "resume", speed?: number): Promise<void>;
@@ -24,6 +25,7 @@ export const httpApi: Api = {
   getSops: () => call("/sops"),
   getSources: () => call("/sources"),
   getCurrent: () => call("/runs/current"),
+  getConfig: () => call("/config"),
   startRun: (sop, sourceId) => call("/runs", { method: "POST", body: JSON.stringify({ sop, source_id: sourceId }) }),
   stopRun: async (runId) => { await call(`/runs/${runId}/stop`, { method: "POST" }); },
   control: async (runId, action, speed) => {

@@ -2,6 +2,7 @@
 
 Live SOP monitoring: a custom YOLO detector turns camera frames into a JSON scene state ("fan bay 3: installed, hand near PSU bay 1"). **Jev** (TypeSafe AI's System One decision model) reads that state, names the SOP step under way, and can raise off-SOP and anomaly warnings. A step is ticked off once its part is visibly in place: either Jev holds "done" while the part is visible, or the part stays visible for 1 s. On the test footage the 1 s visual check always got there first (see Results). A web dashboard shows the live checklist, Jev's judgment, a timeline and alerts. The first SOP is a server fan / power-supply / cover install.
 
+- Architecture and flow diagrams: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 - Design: [docs/superpowers/specs/2026-10-01-sop-vision-design.md](docs/superpowers/specs/2026-10-01-sop-vision-design.md)
 - Build plan: [docs/superpowers/plans/2026-10-01-sop-vision-phase1.md](docs/superpowers/plans/2026-10-01-sop-vision-phase1.md)
 - Findings and numbers: [docs/superpowers/notes/phase0.md](docs/superpowers/notes/phase0.md)
@@ -75,7 +76,49 @@ The container supports recorded videos and RTSP cameras; the USB webcam works na
 uv run pytest                   # unit tests (no network, no GPU)
 uv run pytest -m gpu            # real detector weights
 uv run pytest -m jev            # real Jev API: contract + violation scenarios
+docker compose --profile test run --rm tests              # unit tests in Docker
+docker compose --profile test run --rm tests -m decider   # real local Decider (service must be up)
 cd web && npx vitest run        # dashboard
+```
+
+## Local Decider (Jev comparison)
+
+[Mapika/decider-4b](https://huggingface.co/Mapika/decider-4b) is an open model that serves Jev's own wire format (`POST /v1/systemone`), so the app sends it **byte-identical** requests through the same client. `DECISION_MODE` in `.env` picks who decides:
+
+| `DECISION_MODE` | Decides | Also | Needs |
+|---|---|---|---|
+| `jev` (default) | Jev | – | `TYPESAFE_API_KEY` |
+| `decider` | local Decider | – | the Decider service ready (checked at startup) |
+| `compare` | Jev | Decider gets the same request at the same moment; both answers are logged | the key; Decider optional (its errors are logged, Jev is unaffected) |
+
+```bash
+docker compose --profile decider up -d decider        # first start downloads 8.4 GB, then loads (~1-2 min)
+docker compose run --rm sopvision doctor              # decider: running / model_loaded / gpu / inference
+docker compose --profile test run --rm tests -m decider   # smoke test against the real model
+DECISION_MODE=compare docker compose up sopvision     # or set it in .env
+```
+
+**Where the model lives.** The `decider` service (`docker/decider.Dockerfile`) runs the model's own server from the downloaded snapshot. Weights go to the `hf_cache` Docker volume (`/cache/huggingface`), never into git or the image. The revision is pinned to a commit SHA (`DECIDER_REVISION`, default v2.1 `eb5fbdfc…`), so an upstream push can't change results. On first start it downloads; on later starts it finds the snapshot and makes no network calls. Compiled Triton kernels are cached in the same volume. Behind a TLS-intercepting proxy, set `CORP_CA_DIR` to the folder of your corporate root CA files so the build trusts them (verification stays on).
+
+**Readiness.** The service's `/health` reports ok only after the weights are loaded and CUDA graphs captured; the app additionally sends one real decision and checks the probabilities and that it runs on CUDA (`sopvision.decide.providers.decider_readiness`).
+
+**What gets logged.** Every `decision` event now has `provider`, `request_ms` (wall time of the call, retries included) and, live, `e2e_ms` (from the moment the scene had enough context for a call to the tracker applying the answer). In `compare` mode each request also writes one `decision_comparison` event: the exact state and questions, both providers' answers, errors and latencies, how far they differ (raw, and at the 0.8 acting threshold), `wait_ms` (context-ready to request sent) and a `ground_truth` slot.
+
+**Benchmark.** Agreement is not accuracy, so the benchmark scores each provider against the recordings' step segments where the answer is known:
+
+```bash
+DECISION_MODE=compare docker compose run --rm sopvision eval --out runs/eval-compare.json   # also writes runs/eval-compare.<video>.jsonl
+docker compose run --rm --entrypoint python sopvision scripts/bench_decisions.py runs/eval-compare.test-*.jsonl
+#   --no-replay scores the recorded answers instead of calling both models again
+```
+
+It reports per provider: step accuracy, off-SOP false positive/negative rates, anomaly false positives on the clean runs, mean confidence and confidence when wrong, and request latency p50/p95/max (plus end to end for live logs). It also reports how often the two agree.
+
+**Vision model (not used for decisions yet).** `Mapika/decider-2b-vision` is cached in the same volume and smoke-tested on its own (image + text context + bounded options → probabilities):
+
+```bash
+docker compose --profile decider stop decider     # free the GPU for it
+docker compose --profile decider run --rm decider python scripts/decider_vision_smoke.py
 ```
 
 ## Retrain or add equipment

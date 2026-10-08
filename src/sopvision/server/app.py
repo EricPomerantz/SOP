@@ -38,6 +38,13 @@ def create_app(settings: Settings, manager: RunManager) -> FastAPI:
                  "steps": [{"id": st.id, "label": s.step_label(st.id), "text": st.text} for st in s.steps]}
                 for s in manager.sops.values()]
 
+    @app.get("/config")
+    def config():
+        """What the dashboard needs before any run: which model makes the decisions."""
+        from sopvision.decide.providers import authoritative_provider
+
+        return {"decision_model": authoritative_provider(settings), "decision_mode": settings.decision_mode}
+
     @app.get("/sources")
     def sources():
         return [s.model_dump(mode="json") for s in list_sources(settings)]

@@ -1,5 +1,6 @@
 """Startup checks and the one-run-at-a-time manager behind the API."""
 
+import logging
 import secrets
 import time
 from collections.abc import Callable
@@ -15,6 +16,8 @@ from sopvision.settings import Settings
 from sopvision.sources.registry import SourceSpec, check_available, list_sources
 from sopvision.storage.report import RunReport, build_report
 from sopvision.storage.runlog import RunLog, read_events
+
+logger = logging.getLogger(__name__)
 
 
 class RunConflictError(RuntimeError):
@@ -33,6 +36,7 @@ class RunInfo(BaseModel):
     run_id: str
     sop: str
     source: str
+    decision_model: str = "jev"  # the model driving the tracker: jev | decider | laya
 
 
 def startup_checks(settings: Settings, gpu: GpuReport) -> list[SopConfig]:
@@ -44,14 +48,30 @@ def startup_checks(settings: Settings, gpu: GpuReport) -> list[SopConfig]:
         if not Path(sop.detector.weights).exists():
             raise ConfigError(f"Weights not found: {sop.detector.weights}. Train the detector (training/train.py) "
                               "or fix detector.weights.")
-    if not settings.typesafe_api_key.get_secret_value():
-        raise ConfigError("TYPESAFE_API_KEY is not set. Add it to .env.")
+    check_decision_providers(settings)
     return sops
+
+
+def check_decision_providers(settings: Settings, readiness=None) -> None:
+    """Jev needs its key; Decider must answer a real request when it decides, and should when it shadows."""
+    from sopvision.decide.providers import local_provider, local_readiness, uses_jev
+
+    if uses_jev(settings) and not settings.typesafe_api_key.get_secret_value():
+        raise ConfigError("TYPESAFE_API_KEY is not set. Add it to .env.")
+    provider = local_provider(settings)
+    if provider:
+        r = (readiness or local_readiness)(settings, provider)
+        if not r.ready and settings.decision_mode != "compare":
+            raise ConfigError(f"DECISION_MODE={provider} but the local {provider} service isn't ready: {r.detail}. "
+                              f"Start it with `docker compose --profile {provider} up -d {provider}` or set DECISION_MODE=jev.")
+        if not r.ready:
+            # Compare mode keeps Jev's behaviour; the shadow's failures are recorded per request.
+            logger.warning(f"DECISION_MODE=compare: {r.detail}; Jev still decides, {provider} errors will be logged")
 
 
 def default_run_factory(settings: Settings) -> Callable:
     """Builds real LiveRuns; detectors are loaded once per SOP and reused across runs."""
-    from sopvision.decide.jev_client import JevClient
+    from sopvision.decide.providers import clients_for
     from sopvision.perception.detector import YoloDetector
     from sopvision.pipeline import LiveRun
     from sopvision.sources.registry import open_source
@@ -64,9 +84,8 @@ def default_run_factory(settings: Settings) -> Callable:
             detectors[sop.sop] = YoloDetector(sop.detector.weights, sop.detector.classes)
         detector = detectors[sop.sop]
         detector.reset()
-        client = JevClient(settings.typesafe_api_key.get_secret_value(), settings.typesafe_base_url,
-                           settings.typesafe_model)
-        return LiveRun(ctx, open_source(spec, settings), detector, client)
+        client, shadow = clients_for(settings)
+        return LiveRun(ctx, open_source(spec, settings), detector, client, shadow)
 
     return factory
 
@@ -105,7 +124,9 @@ class RunManager:
         runlog = RunLog(self.settings.runs_dir / f"{run_id}.jsonl")
         ctx = RunContext(run_id, sop, spec, runlog, self.broadcast, self.frames)
         self.run, self.spec, self.last_decision = self.run_factory(ctx, spec), spec, None
-        self.info = RunInfo(run_id=run_id, sop=sop.sop, source=spec.id)
+        from sopvision.decide.providers import authoritative_provider
+
+        self.info = RunInfo(run_id=run_id, sop=sop.sop, source=spec.id, decision_model=authoritative_provider(self.settings))
         await self.run.start()
         return self.info
 
@@ -131,8 +152,7 @@ class RunManager:
     def current(self) -> dict | None:
         if not self._active():
             return None
-        return {"run_id": self.info.run_id, "sop": self.info.sop, "source": self.info.source,
-                **self.run.snapshot(), "last_decision": self.last_decision}
+        return {**self.info.model_dump(), **self.run.snapshot(), "last_decision": self.last_decision}
 
     def report(self, run_id: str) -> RunReport:
         path = self.settings.runs_dir / f"{run_id}.jsonl"

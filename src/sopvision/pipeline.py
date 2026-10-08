@@ -1,4 +1,4 @@
-"""Wires sources, detector, scene, Jev and tracker into a run (spec §4.2).
+"""Wires sources, detector, scene, Jev (or the local Decider) and tracker into a run (spec §4.2).
 
 Live: a pipeline thread reads the newest frame, detects, builds the scene and draws the overlay;
 the event loop runs the tracker, the Jev decider, the run log and the broadcast. Video never
@@ -9,10 +9,11 @@ import asyncio
 import threading
 import time
 from collections.abc import Callable
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 
 from sopvision.config import SopConfig
 from sopvision.decide.decider import JevDecider
+from sopvision.decide.providers import display_name
 from sopvision.decide.types import Decision
 from sopvision.messages import AlertMsg, DecisionMsg, RunSummaryMsg, SceneMsg, StepUpdateMsg, to_ws
 from sopvision.perception.detector import Detector
@@ -44,7 +45,8 @@ class LockstepResult:
     steps: list[StepState]
     alerts: list[Alert]
     latencies_ms: list[float]
-    decisions: list[tuple[float, str]]  # (request time, Jev's current_step answer)
+    decisions: list[tuple[float, str]]  # (request time, the authoritative current_step answer)
+    comparisons: list[dict] = field(default_factory=list)  # decision_comparison payloads (compare mode)
 
 
 @dataclass
@@ -61,8 +63,9 @@ class RunCore:
     """Tracker + logging + broadcast, shared by live and lockstep runs so they behave identically."""
 
     def __init__(self, sop: SopConfig, run_id: str, source_id: str, runlog: RunLog | None,
-                 broadcast: Callable[[dict], None] | None = None):
+                 broadcast: Callable[[dict], None] | None = None, model: str = "Jev"):
         self.sop, self.run_id, self.runlog = sop, run_id, runlog
+        self.model = model  # display name of the deciding model, for alerts
         self.broadcast = broadcast or (lambda msg: None)
         self.tracker = SopTracker(sop)
         self.events: list[RunEvent] = []
@@ -116,16 +119,25 @@ class RunCore:
         a = d.answers
         self.latencies_ms.append(a.latency_ms)
         self.decisions.append((d.t_request, a.current_step))
-        self._log(d.t_request, "decision", {"version": d.version, "active_step_id": d.active_step_id} | asdict(a))
+        items = self.tracker.on_decision(d, self.last_scene)
+        # End to end: from enough scene context for a call to the tracker having applied the answer (live only).
+        e2e = None if d.ctx_ready is None else round((time.perf_counter() - d.ctx_ready) * 1000, 2)
+        request_ms = None if d.request_ms is None else round(d.request_ms, 2)
+        self._log(d.t_request, "decision", {"version": d.version, "active_step_id": d.active_step_id} | asdict(a)
+                  | {"request_ms": request_ms, "e2e_ms": e2e})
         self.broadcast(to_ws(DecisionMsg(t=d.t_request, current_step=a.current_step, confidence=a.current_confidence,
                                          active_step_id=d.active_step_id, active_step_done=a.active_step_done,
                                          anomaly=a.anomaly, off_sop=a.current_probabilities.get("off_sop", 0.0),
-                                         latency_ms=a.latency_ms)))
-        self.emit(self.tracker.on_decision(d, self.last_scene))
+                                         latency_ms=a.latency_ms, provider=a.provider)))
+        self.emit(items)
+
+    def on_comparison(self, record: dict) -> None:
+        if not self.closed:
+            self._log(record["t_request"], "decision_comparison", record)
 
     def on_status(self, status: str, t: float) -> None:
         if not self.closed:
-            self.emit(self.tracker.set_jev_online(status == "online", t))
+            self.emit(self.tracker.set_jev_online(status == "online", t, self.model))
 
     def source_lost(self) -> None:
         if not self.closed:
@@ -149,10 +161,11 @@ class RunCore:
 
 
 async def run_lockstep(sop: SopConfig, source: VideoSource, detector: Detector, client, runlog: RunLog | None = None,
-                       run_id: str = "eval", source_id: str = "file") -> LockstepResult:
-    core = RunCore(sop, run_id, source_id, runlog)
+                       run_id: str = "eval", source_id: str = "file", shadow=None) -> LockstepResult:
+    core = RunCore(sop, run_id, source_id, runlog, model=display_name(getattr(client, "provider", "jev")))
     builder = SceneBuilder(sop)
-    decider = JevDecider(sop, client, "lockstep", on_decision=core.on_decision, on_status=core.on_status)
+    decider = JevDecider(sop, client, "lockstep", on_decision=core.on_decision, on_status=core.on_status,
+                         shadow=shadow, on_comparison=core.on_comparison)
     frames: list[FrameRecord] = []
     for frame in source.frames():
         scene, events = builder.update(frame.t, detector.detect(frame))
@@ -162,16 +175,18 @@ async def run_lockstep(sop: SopConfig, source: VideoSource, detector: Detector, 
         frames.append(FrameRecord(frame.t, {k: v.state for k, v in scene.slots.items()}))
     await decider.aclose()
     core.finish()
-    return LockstepResult(frames, core.tracker.steps(), core.alerts, core.latencies_ms, core.decisions)
+    return LockstepResult(frames, core.tracker.steps(), core.alerts, core.latencies_ms, core.decisions,
+                          [e.payload for e in core.events if e.type == "decision_comparison"])
 
 
 class LiveRun:
-    def __init__(self, ctx: RunContext, source: VideoSource, detector: Detector, client):
+    def __init__(self, ctx: RunContext, source: VideoSource, detector: Detector, client, shadow=None):
         self.ctx, self.source, self.detector = ctx, source, detector
-        self.core = RunCore(ctx.sop, ctx.run_id, ctx.source_spec.id, ctx.runlog, ctx.broadcast)
+        self.core = RunCore(ctx.sop, ctx.run_id, ctx.source_spec.id, ctx.runlog, ctx.broadcast,
+                            model=display_name(getattr(client, "provider", "jev")))
         self.builder = SceneBuilder(ctx.sop)
         self.decider = JevDecider(ctx.sop, client, "live", on_decision=self.core.on_decision,
-                                  on_status=self.core.on_status)
+                                  on_status=self.core.on_status, shadow=shadow, on_comparison=self.core.on_comparison)
         self.done = asyncio.Event()
         self.reader: LatestFrameReader | None = None
         self.report: dict | None = None
@@ -218,7 +233,7 @@ class LiveRun:
             last = now
             if self.core.latencies_ms:
                 self._jev_ms = self.core.latencies_ms[-1]
-            image = draw_overlay(frame.image, scene, detections, self.ctx.sop, OverlayStats(fps, det_ms, self._jev_ms))
+            image = draw_overlay(frame.image, scene, detections, self.ctx.sop, OverlayStats(fps, det_ms, self._jev_ms, self.core.model))
             self.ctx.frames.put(encode_jpeg(image))
             if self._stopping:
                 return
