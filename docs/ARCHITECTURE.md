@@ -94,6 +94,26 @@ A few things that are easy to miss:
 - **Lockstep mode (`sopvision eval`)** processes every frame in order and applies each answer a fixed 0.5 s of video
   time later, so results don't depend on machine or network speed.
 
+## Torque input (SOPs with a tool, e.g. lug bolts)
+
+Some steps complete on an external signal rather than on what the camera sees: a torque wrench reports that a
+tightening reached torque, but not on which nut. The camera supplies the *where*.
+
+```mermaid
+flowchart LR
+    wrench["Torque wrench system<br/>(or simulate_torque.py)"] -->|"POST /runs/{id}/torque<br/>ok, torque_nm"| live["LiveRun.torque<br/>t = latest frame + camera delay"]
+    log[("torque.csv<br/>recorded runs")] --> lock["run_lockstep(torque=…)"]
+    live --> attr["TorqueAttributor<br/>waits for the frames around t,<br/>the holes the wrench was at vote<br/><i>sop/torque.py</i>"]
+    lock --> attr
+    scene["SceneBuilder<br/>tools: wrench near hole_k<br/><i>scene/builder.py</i>"] --> attr
+    attr --> judge["SopTracker.on_torque<br/>OK on a hole with a bolt → mark torqued;<br/>else not_reached / unattributed /<br/>without_part / repeated"]
+    judge -->|mark_torqued| scene
+    scene -->|"slot shows torqued"| done["torque_k done (source: torque);<br/>out of sequence → order_violation"]
+```
+
+The camera's delay (how far its frames trail reality) is measured with the dashboard's latency page (`/#/latency`,
+`sources/latency.py`) and stored per camera; recorded videos have none.
+
 ## Code layout
 
 ```
@@ -102,17 +122,21 @@ src/sopvision/
   settings.py       environment / .env settings (decision mode, model URLs, paths)
   config.py         SOP YAML schema: steps, slots, order rules, thresholds
   pipeline.py       RunCore (tracker + logging + broadcast), LiveRun, run_lockstep
-  sources/          file, RTSP, webcam sources; LatestFrameReader; source registry
+  sources/          file, RTSP (low-latency), webcam sources; LatestFrameReader; source registry;
+                    camera delay measurement (latency.py)
   perception/       YoloDetector (Ultralytics + ByteTrack)
   scene/            SceneBuilder (detections → SceneState + events), geometry, video overlay
+  recordings.py     an SOP's recordings and step timelines, whichever dataset format (timeline / clips)
   decide/           when to ask (decider.py), what to ask (questions.py), the client (jev_client.py),
                     provider selection + readiness (providers.py), side-by-side records (compare.py)
-  sop/              SopTracker: evidence completion, active step, order/removal/off-SOP/anomaly alerts
+  sop/              SopTracker: evidence completion, active step, order/removal/off-SOP/anomaly alerts;
+                    torque results and their attribution to slots (torque.py)
   storage/          append-only JSONL run log, run report (JSON/CSV)
   server/           FastAPI app (REST, /ws, MJPEG), RunManager (one run at a time), frame buffer
-  evaluation/       acceptance eval, Docker parity, scenario videos, Jev-vs-local metrics, request variants
+  evaluation/       acceptance eval, Docker parity, scenario videos, Jev-vs-local metrics, request variants,
+                    SOP-driven deviation generators (deviations.py)
 web/                React + Vite dashboard (built into the app image)
-sops/               SOP definitions (server_fan.yaml)
+sops/               SOP definitions (server_fan.yaml); sops/drafts/ for SOPs without a trained detector yet (lug_bolts.yaml)
 training/           YOLO detector: frame sampling, reference labelling, dataset build, training
 scripts/            benchmarks, decision-model data pipeline, smoke tests (below)
 docker/             Decider and Laya images and entrypoints; docker/certs for a corporate root CA
@@ -127,7 +151,8 @@ Generated and local-only (gitignored): `runs/` (run logs, eval reports, experime
 ## Decision-model evaluation and training
 
 The local models are compared with Jev on recorded requests, and Laya is fine-tuned on requests captured from the
-training recordings. Recordings Install_12 and 13 are test-only throughout.
+training recordings. Test-split recordings (server fan: Install_12 and 13) are never used for training. Every script
+takes `--sop` (default: the first SOP in `sops/`).
 
 ```mermaid
 flowchart TD
@@ -164,6 +189,7 @@ flowchart TD
 | `scripts/capture_requests.py` | Capture decision requests from the training/validation recordings |
 | `scripts/build_training_set.py` | Labelled, augmented Laya-format rows, with leakage checks against the frozen sets |
 | `scripts/eval_training_rows.py` | Score a provider on training-format rows (validation) |
+| `scripts/simulate_torque.py` | Send torque results to a running app (interactive, periodic, or a recorded log) |
 | `scripts/decider_vision_smoke.py` | Smoke test for Mapika/decider-2b-vision (not used for decisions) |
 | `scripts/docker_smoke.py` | The app image builds, sees the GPU and serves the API |
 

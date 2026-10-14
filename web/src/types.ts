@@ -13,8 +13,18 @@ export type WsMessage = SceneMsg | DecisionMsg | StepUpdateMsg | AlertMsg | RunS
 
 export type StepStatus = "pending" | "active" | "done";
 export type SopStep = { id: string; label: string; text: string };
-export type Sop = { id: string; name: string; version: number; description: string; steps: SopStep[] };
+export type Sop = { id: string; name: string; version: number; description: string; steps: SopStep[]; torque?: boolean };
 export type SourceSpec = { id: string; kind: "file" | "webcam" | "rtsp"; label: string };
+export type LatencyResult = {
+  frames: number; fps: number; decoded: number; delay_ms?: number; p10_ms?: number; p90_ms?: number;
+  min_ms?: number; max_ms?: number; source_id?: string; saved?: boolean; measured_at?: string;
+};
+export type RecordingSop = { file: string; id: string; name: string; dataset: string; torque: boolean };
+export type RecordingStatus = {
+  run_id: string; sop: string; split: string; source: string; folder: string; seconds: number; frames: number;
+  camera_delay_ms: number; presses: { time_s: number; ok: boolean }[]; error: string | null;
+};
+export type RecordingSummary = { run_id: string; folder: string; frames: number; seconds: number; presses: number; split: string };
 export type AppConfig = { decision_model: string; decision_mode: string };
 export type RunInfo = { run_id: string; sop: string; source: string; decision_model?: string };
 export type RunSnapshot = RunInfo & {

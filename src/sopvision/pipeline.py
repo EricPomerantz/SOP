@@ -21,6 +21,7 @@ from sopvision.scene.builder import SceneBuilder
 from sopvision.scene.overlay import OverlayStats, draw_overlay
 from sopvision.scene.types import SceneEvent, SceneState
 from sopvision.server.frames import FrameBuffer, encode_jpeg
+from sopvision.sop.torque import TorqueAttributor, TorqueResult, read_torque_log
 from sopvision.sop.tracker import SopTracker
 from sopvision.sop.types import Alert, StepState, StepUpdate
 from sopvision.sources.base import VideoSource
@@ -66,6 +67,9 @@ class RunCore:
                  broadcast: Callable[[dict], None] | None = None, model: str = "Jev"):
         self.sop, self.run_id, self.runlog = sop, run_id, runlog
         self.model = model  # display name of the deciding model, for alerts
+        # Torque results need a tool to attribute them (sop.layout.tools); mark_torqued is the scene builder's.
+        self.torque = TorqueAttributor(set(sop.layout.slots)) if sop.layout.tools else None
+        self.mark_torqued: Callable[[str], None] = lambda slot: None
         self.broadcast = broadcast or (lambda msg: None)
         self.tracker = SopTracker(sop)
         self.events: list[RunEvent] = []
@@ -109,6 +113,9 @@ class RunCore:
             if e.kind == "chassis_lost":
                 self.emit([Alert(e.t, "warning", "chassis_lost", "Chassis not visible")])
         self.emit(self.tracker.on_scene(scene))
+        if self.torque is not None:
+            self.torque.observe(scene)
+            self._judge_torque(self.torque.resolve(scene.t), scene)
         if scene.t - self._last_scene_msg >= SCENE_MSG_INTERVAL:
             self._last_scene_msg = scene.t
             self.broadcast(to_ws(SceneMsg(t=scene.t, scene=scene.to_jev_dict())))
@@ -131,6 +138,24 @@ class RunCore:
                                          latency_ms=a.latency_ms, provider=a.provider)))
         self.emit(items)
 
+    def on_torque(self, result: TorqueResult) -> None:
+        """A torque result from the wrench; judged once the frames around it have been seen."""
+        if self.closed:
+            return
+        if self.torque is None:
+            raise ValueError(f"SOP {self.sop.sop} has no torque tool (layout.tools)")
+        self.torque.add(result)
+
+    def _judge_torque(self, attributed, scene: SceneState) -> None:
+        for a in attributed:
+            alerts, slot = self.tracker.on_torque(a, scene)
+            r = a.result
+            self._log(r.t, "torque", {"ok": r.ok, "torque_nm": r.torque_nm, "slot": a.slot, "reason": a.reason,
+                                      "accepted": slot is not None})
+            self.emit(alerts)
+            if slot is not None:
+                self.mark_torqued(slot)
+
     def on_comparison(self, record: dict) -> None:
         if not self.closed:
             self._log(record["t_request"], "decision_comparison", record)
@@ -149,6 +174,8 @@ class RunCore:
         A run aborted by a system failure (source or processing error) skips the incomplete check: the operator
         didn't leave the SOP unfinished, the system stopped watching.
         """
+        if self.torque is not None and self.last_scene is not None:
+            self._judge_torque(self.torque.resolve(self.last_t, flush=True), self.last_scene)
         if check_incomplete:
             self.emit(self.tracker.end_run(self.last_t))
         report = asdict(build_report(self.events))
@@ -161,9 +188,14 @@ class RunCore:
 
 
 async def run_lockstep(sop: SopConfig, source: VideoSource, detector: Detector, client, runlog: RunLog | None = None,
-                       run_id: str = "eval", source_id: str = "file", shadow=None) -> LockstepResult:
+                       run_id: str = "eval", source_id: str = "file", shadow=None,
+                       torque: list[TorqueResult] | None = None) -> LockstepResult:
+    """`torque`: a recorded torque log, times on the video's timeline."""
     core = RunCore(sop, run_id, source_id, runlog, model=display_name(getattr(client, "provider", "jev")))
     builder = SceneBuilder(sop)
+    core.mark_torqued = builder.mark_torqued
+    for result in sorted(torque or [], key=lambda r: r.t):
+        core.on_torque(result)
     decider = JevDecider(sop, client, "lockstep", on_decision=core.on_decision, on_status=core.on_status,
                          shadow=shadow, on_comparison=core.on_comparison)
     frames: list[FrameRecord] = []
@@ -180,11 +212,19 @@ async def run_lockstep(sop: SopConfig, source: VideoSource, detector: Detector, 
 
 
 class LiveRun:
-    def __init__(self, ctx: RunContext, source: VideoSource, detector: Detector, client, shadow=None):
+    def __init__(self, ctx: RunContext, source: VideoSource, detector: Detector, client, shadow=None,
+                 camera_delay: float = 0.0):
         self.ctx, self.source, self.detector = ctx, source, detector
         self.core = RunCore(ctx.sop, ctx.run_id, ctx.source_spec.id, ctx.runlog, ctx.broadcast,
                             model=display_name(getattr(client, "provider", "jev")))
         self.builder = SceneBuilder(ctx.sop)
+        self.core.mark_torqued = self.builder.mark_torqued  # a set add: safe from the event loop
+        torque_log = getattr(ctx.source_spec, "torque_log", None)
+        if torque_log is not None and self.core.torque is not None:
+            # A replayed recording brings its own torque results; each is judged when the video reaches it.
+            for result in read_torque_log(torque_log):
+                self.core.on_torque(result)
+        self.camera_delay = camera_delay  # seconds the source's frames trail reality (0 for recorded videos)
         self.decider = JevDecider(ctx.sop, client, "live", on_decision=self.core.on_decision,
                                   on_status=self.core.on_status, shadow=shadow, on_comparison=self.core.on_comparison)
         self.done = asyncio.Event()
@@ -277,6 +317,13 @@ class LiveRun:
             self.report = self.core.finish(check_incomplete=not self._aborted)
             self.done.set()
             return self.report
+
+    def torque(self, ok: bool, torque_nm: float | None = None) -> float:
+        """A torque result arriving now. Frames trail reality by the camera delay, so on the video's timeline it
+        happened at the latest frame's time plus that delay. Returns that time."""
+        t = self.core.last_t + self.camera_delay
+        self.core.on_torque(TorqueResult(t, ok, torque_nm))
+        return t
 
     def snapshot(self) -> dict:
         """Current steps and alerts, for a dashboard that opens mid-run."""

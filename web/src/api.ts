@@ -1,10 +1,23 @@
-import type { AppConfig, RunInfo, RunSnapshot, Sop, SourceSpec, WsMessage } from "./types";
+import type {
+  AppConfig, LatencyResult, RecordingSop, RecordingStatus, RecordingSummary, RunInfo, RunSnapshot, Sop, SourceSpec, WsMessage,
+} from "./types";
 
 export type Api = {
   getSops(): Promise<Sop[]>;
   getSources(): Promise<SourceSpec[]>;
   getCurrent(): Promise<RunSnapshot | null>;
   getConfig?(): Promise<AppConfig>;
+  latencyClock?(): Promise<{ now_ms: number }>;
+  measureLatency?(sourceId: string, seconds: number, save: boolean): Promise<LatencyResult>;
+  getLatency?(): Promise<Record<string, LatencyResult>>;
+  runTorque?(runId: string, ok: boolean): Promise<{ t: number }>;
+  getRecordingSops?(): Promise<RecordingSop[]>;
+  getRecordingSopErrors?(): Promise<{ file: string; error: string }[]>;
+  getRecording?(): Promise<RecordingStatus | null>;
+  startRecording?(sopFile: string, sourceId: string, split: string, name?: string): Promise<RecordingStatus>;
+  recordingTorque?(ok: boolean): Promise<{ time_s: number }>;
+  stopRecording?(): Promise<RecordingSummary>;
+  discardRecording?(): Promise<{ run_id: string; discarded: boolean }>;
   startRun(sop: string, sourceId: string): Promise<RunInfo>;
   stopRun(runId: string): Promise<void>;
   control(runId: string, action?: "pause" | "resume", speed?: number): Promise<void>;
@@ -26,6 +39,20 @@ export const httpApi: Api = {
   getSources: () => call("/sources"),
   getCurrent: () => call("/runs/current"),
   getConfig: () => call("/config"),
+  latencyClock: () => call("/latency/clock"),
+  measureLatency: (sourceId, seconds, save) =>
+    call("/latency/measure", { method: "POST", body: JSON.stringify({ source_id: sourceId, seconds, save }) }),
+  getLatency: () => call("/latency"),
+  runTorque: (runId, ok) => call(`/runs/${runId}/torque`, { method: "POST", body: JSON.stringify({ ok }) }),
+  getRecordingSops: () => call("/recording/sops"),
+  getRecordingSopErrors: () => call("/recording/sop-errors"),
+  getRecording: () => call("/recording"),
+  startRecording: (sopFile, sourceId, split, name) => call("/recording/start", {
+    method: "POST", body: JSON.stringify({ sop_file: sopFile, source_id: sourceId, split, name: name || null }),
+  }),
+  recordingTorque: (ok) => call("/recording/torque", { method: "POST", body: JSON.stringify({ ok }) }),
+  stopRecording: () => call("/recording/stop", { method: "POST" }),
+  discardRecording: () => call("/recording/discard", { method: "POST" }),
   startRun: (sop, sourceId) => call("/runs", { method: "POST", body: JSON.stringify({ sop, source_id: sourceId }) }),
   stopRun: async (runId) => { await call(`/runs/${runId}/stop`, { method: "POST" }); },
   control: async (runId, action, speed) => {

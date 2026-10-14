@@ -10,7 +10,8 @@ from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from sopvision.server.runs import NotFoundError, NotPausableError, RunConflictError, RunManager
+from sopvision.config import ConfigError
+from sopvision.server.runs import NoTorqueToolError, NotFoundError, NotPausableError, RunConflictError, RunManager
 from sopvision.settings import Settings
 from sopvision.sources.base import SourceUnavailableError
 from sopvision.sources.registry import list_sources
@@ -24,6 +25,25 @@ class StartRun(BaseModel):
     source_id: str
 
 
+class LatencyMeasure(BaseModel):
+    source_id: str
+    seconds: float = 10.0
+    save: bool = False  # store the result as this camera's delay
+
+
+class StartRecording(BaseModel):
+    sop_file: str
+    source_id: str
+    split: Literal["train", "val", "test"] = "train"
+    name: str | None = None  # the run folder name; default r<date>-<time>
+    fps: float = 25.0
+
+
+class Torque(BaseModel):
+    ok: bool  # the tightening reached the target torque
+    torque_nm: float | None = None
+
+
 class Control(BaseModel):
     action: Literal["pause", "resume"] | None = None
     speed: float | None = None
@@ -35,6 +55,7 @@ def create_app(settings: Settings, manager: RunManager) -> FastAPI:
     @app.get("/sops")
     def sops():
         return [{"id": s.sop, "name": s.display_name, "version": s.version, "description": s.description,
+                 "torque": bool(s.layout.tools),  # the dashboard shows torque buttons for these
                  "steps": [{"id": st.id, "label": s.step_label(st.id), "text": st.text} for st in s.steps]}
                 for s in manager.sops.values()]
 
@@ -67,6 +88,111 @@ def create_app(settings: Settings, manager: RunManager) -> FastAPI:
         except NotFoundError as e:
             raise HTTPException(404, str(e)) from None
         return {"stopped": run_id}
+
+    @app.post("/runs/{run_id}/torque")
+    def torque(run_id: str, body: Torque):
+        """One tightening result from the torque wrench system (or a bridge in front of it), sent as it happens."""
+        try:
+            t = manager.torque(run_id, body.ok, body.torque_nm)
+        except NotFoundError as e:
+            raise HTTPException(404, str(e)) from None
+        except NoTorqueToolError as e:
+            raise HTTPException(409, str(e)) from None
+        return {"t": t}
+
+    @app.get("/latency/clock")
+    def latency_clock():
+        """The app's clock, so the latency page can draw its QR code on the same timeline the app measures with."""
+        import time
+
+        return {"now_ms": time.time() * 1000}
+
+    @app.get("/latency")
+    def latency_results():
+        from sopvision.sources.latency import load_delays
+
+        return load_delays(settings)
+
+    @app.post("/latency/measure")
+    async def latency_measure(body: LatencyMeasure):
+        """Read the camera for a few seconds while it films the latency page's QR clock; report the delay."""
+        from sopvision.sources.latency import measure, save_delay
+        from sopvision.sources.registry import open_source
+
+        if manager.current() is not None or manager.recording is not None:
+            raise HTTPException(409, "Stop the current run or recording first: the measurement needs the camera to itself.")
+        spec = next((s for s in list_sources(settings) if s.id == body.source_id), None)
+        if spec is None:
+            raise HTTPException(404, f"Unknown source {body.source_id}")
+        if spec.kind == "file":
+            raise HTTPException(400, "Recorded videos have no camera delay; pick a live camera.")
+        seconds = min(max(body.seconds, 2.0), 60.0)
+        try:
+            source = open_source(spec, settings)
+        except SourceUnavailableError as e:
+            raise HTTPException(400, str(e)) from None
+        try:
+            result = await asyncio.wait_for(asyncio.to_thread(measure, source.frames(), seconds), seconds + 15)
+        except TimeoutError:
+            raise HTTPException(504, f"No frames from {spec.label} within {seconds + 15:.0f} s") from None
+        finally:
+            source.close()
+        if not result.get("decoded"):
+            raise HTTPException(422, f"Got {result['frames']} frames but no readable QR clock: point the camera at the "
+                                     "latency page so the code fills a good part of the picture.")
+        if body.save:
+            save_delay(settings, spec.id, result)
+        return result | {"source_id": spec.id, "saved": body.save}
+
+    @app.get("/recording/sops")
+    def recording_sops():
+        return manager.recording_sops()
+
+    @app.get("/recording/sop-errors")
+    def recording_sop_errors():
+        return manager.recording_sop_errors()
+
+    @app.get("/recording")
+    def recording_status():
+        return manager.recording.status() if manager.recording is not None else None
+
+    @app.post("/recording/start")
+    def recording_start(body: StartRecording):
+        try:
+            return manager.start_recording(body.sop_file, body.source_id, body.split, body.name, body.fps)
+        except RunConflictError as e:
+            raise HTTPException(409, str(e)) from None
+        except NotFoundError as e:
+            raise HTTPException(404, str(e)) from None
+        except (ConfigError, SourceUnavailableError) as e:
+            raise HTTPException(400, str(e)) from None
+
+    @app.post("/recording/torque")
+    def recording_torque(body: Torque):
+        """A "torque reached" (or not reached) press while recording; stored on the video's timeline."""
+        try:
+            return {"time_s": manager.recording_torque(body.ok, body.torque_nm)}
+        except NotFoundError as e:
+            raise HTTPException(404, str(e)) from None
+        except NotPausableError as e:
+            raise HTTPException(409, str(e)) from None
+
+    @app.post("/recording/discard")
+    def recording_discard():
+        """Stop recording and delete the run (nothing is saved, splits.yaml is unchanged)."""
+        try:
+            return manager.discard_recording()
+        except NotFoundError as e:
+            raise HTTPException(404, str(e)) from None
+
+    @app.post("/recording/stop")
+    def recording_stop():
+        try:
+            return manager.stop_recording()
+        except NotFoundError as e:
+            raise HTTPException(404, str(e)) from None
+        except ConfigError as e:
+            raise HTTPException(400, str(e)) from None
 
     @app.post("/runs/{run_id}/control")
     def control(run_id: str, body: Control):

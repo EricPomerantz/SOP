@@ -26,15 +26,15 @@ import time
 from dataclasses import asdict
 from pathlib import Path
 
-from sopvision.config import list_sops
-from sopvision.dataset import load_index
+from sopvision.config import SopConfig, list_sops, load_sop
 from sopvision.decide.compare import comparison_record, provider_entry
 from sopvision.decide.jev_client import JevUnavailableError
 from sopvision.decide.providers import make_client
 from sopvision.decide.questions import QuestionSet
 from sopvision.decide.types import ProviderResult
-from sopvision.evaluation.decisions import label, run_number, summarize, summary_text
+from sopvision.evaluation.decisions import label, summarize, summary_text
 from sopvision.evaluation.variants import VARIANTS, expected_steps
+from sopvision.recordings import load_recordings
 from sopvision.settings import Settings
 from sopvision.storage.runlog import read_events
 
@@ -60,17 +60,19 @@ def load(paths: list[Path], limit: int | None) -> list[tuple[str, dict]]:
     return out
 
 
-def labeller(settings: Settings):
+def labeller(settings: Settings, sop: SopConfig):
+    """Ground truth from the SOP's recordings (sopvision.recordings), for runs named '<split>:<recording id>'."""
     try:
-        index = {r.run: r for r in load_index(settings.sop_data_root)}
+        recordings = {r.source_id: r for r in load_recordings(sop, settings) if r.valid}
     except Exception as e:  # noqa: BLE001 — no dataset: everything stays unlabelled
         print(f"no ground truth (dataset not readable: {e})", flush=True)
-        index = {}
+        recordings = {}
 
     def apply(source: str, record: dict) -> dict:
-        # Only unedited recordings (test:/train:/val:Install_N); scenario videos are edited, so their timeline is unknown.
-        run = index.get(run_number(source)) if source.split(":")[0] in ("test", "train", "val") else None
-        return label(record, run.segments if run else None, run is not None, source)
+        # Only unedited recordings carry a timeline; scenario videos are edited, so theirs is unknown.
+        rec = recordings.get(source)
+        # A run with a deviation in it (off-SOP, repeated or out-of-order steps) leaves anomaly unknown.
+        return label(record, rec.segments if rec else None, rec is not None and rec.clean, source)
 
     return apply
 
@@ -142,6 +144,7 @@ def main() -> int:
     ap.add_argument("--no-replay", action="store_true", help="score the recorded answers, call no model")
     ap.add_argument("--limit", type=int, default=None, help="first N requests per log")
     ap.add_argument("--out", type=Path, default=None)
+    ap.add_argument("--sop", type=Path, default=None, help="SOP file (default: the first in sops/)")
     args = ap.parse_args()
     stamp = time.strftime('%Y%m%d-%H%M%S')
     if args.out is None:
@@ -151,7 +154,7 @@ def main() -> int:
         return 2
 
     settings = Settings()
-    sop = list_sops(settings.sops_dir)[0]
+    sop = load_sop(args.sop) if args.sop else list_sops(settings.sops_dir)[0]
     accept = sop.decisions.accept_confidence
     items = load_frozen(args.frozen, args.limit) if args.frozen else load(args.logs, args.limit)
     if not items:
@@ -165,7 +168,7 @@ def main() -> int:
             print("--providers takes one or two providers", file=sys.stderr)
             return 2
         items = asyncio.run(replay(items, settings, accept, lambda r: variant(r, sop), providers))
-    apply = (lambda source, r: r) if args.frozen else labeller(settings)
+    apply = (lambda source, r: r) if args.frozen else labeller(settings, sop)
     records = [apply(source, r) | {"source": source, "expected_steps": expected[(source, r["request_id"])]} for source, r in items]
     summary = summarize(records, accept)
 

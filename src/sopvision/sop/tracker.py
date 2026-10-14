@@ -8,6 +8,7 @@ from dataclasses import dataclass, replace
 from sopvision.config import SopConfig
 from sopvision.decide.types import Decision
 from sopvision.scene.types import SceneState
+from sopvision.sop.torque import AttributedTorque
 from sopvision.sop.types import Alert, StepState, StepUpdate
 
 REMOVAL_HOLD = 1.0  # seconds a done step's part must be observed missing
@@ -92,10 +93,11 @@ class SopTracker:
             if step.status != "done":
                 if self._evidence_holds(sid, scene):
                     since = self._evidence_since.setdefault(sid, t)
-                    wait = (self.sop.decisions.hands_off_seconds if self.sop.step(sid).hands_off
+                    wait = (0.0 if self._torque_step(sid)  # a torque result is a discrete, confirmed event
+                            else self.sop.decisions.hands_off_seconds if self.sop.step(sid).hands_off
                             else self.sop.decisions.evidence_only_after)
                     if t - since >= wait:
-                        out += self._complete(sid, t, "evidence")
+                        out += self._complete(sid, t, "torque" if self._torque_step(sid) else "evidence")
                 else:
                     self._evidence_since.pop(sid, None)
             elif self._contradicted(sid, scene):
@@ -109,6 +111,27 @@ class SopTracker:
             else:
                 self._removed_since.pop(sid, None)
         return out
+
+    def on_torque(self, a: AttributedTorque, scene: SceneState) -> tuple[list[Alert], str | None]:
+        """Judge an attributed torque result: (alerts, slot to mark torqued or None).
+
+        The step itself completes on the next scene, when the slot shows as torqued (on_scene), so the order check
+        is the same one every other step goes through.
+        """
+        r, slot, t = a.result, a.slot, a.result.t
+        where = slot or "an unknown slot"
+        value = f" ({r.torque_nm:g} Nm)" if r.torque_nm is not None else ""
+        if not r.ok:
+            return [Alert(t, "warning", "torque_not_reached", f"Torque not reached on {where}{value}", data={"slot": slot})], None
+        if slot is None:
+            return [Alert(t, "warning", "torque_unattributed", f"Torque result{value} couldn't be placed on a slot: {a.reason}")], None
+        view = scene.slots.get(slot)
+        if view is None or view.effective() != "installed":
+            return [Alert(t, "warning", "torque_without_part", f"Torque on {slot}{value}, but no part is seen there",
+                          data={"slot": slot})], None
+        if view.torqued:
+            return [Alert(t, "warning", "torque_repeated", f"{slot} torqued again{value}", data={"slot": slot})], None
+        return [Alert(t, "info", "torque", f"Torque OK on {slot}{value}", data={"slot": slot})], slot
 
     def set_jev_online(self, online: bool, t: float, model: str = "Jev") -> list[Alert]:
         """The deciding model (Jev, or a local one) went offline. The kind stays `jev_offline` for every model."""
@@ -125,15 +148,24 @@ class SopTracker:
     def _evidence_holds(self, sid: str, scene: SceneState) -> bool:
         """Every evidence slot holds the required part — and, for hands_off steps, nobody is touching it."""
         step = self.sop.step(sid)
-        return all(slot in scene.slots and scene.slots[slot].effective() == want
-                   and not (step.hands_off and scene.slots[slot].touched)
+        return all(slot in scene.slots and (scene.slots[slot].torqued if want == "torqued" else
+                                            scene.slots[slot].effective() == want
+                                            and not (step.hands_off and scene.slots[slot].touched))
                    for slot, want in step.evidence.items())
+
+    def _torque_step(self, sid: str) -> bool:
+        evidence = self.sop.step(sid).evidence
+        return bool(evidence) and all(want == "torqued" for want in evidence.values())
 
     def _contradicted(self, sid: str, scene: SceneState) -> bool:
         """An evidence slot is *observed* (not occluded/unknown) in the opposite state."""
         for slot, want in self.sop.step(sid).evidence.items():
             view = scene.slots.get(slot)
-            if view is not None and view.state in ("installed", "empty") and view.state != want:
+            if view is None or view.state not in ("installed", "empty"):
+                continue
+            if want == "torqued" and view.state == "empty":  # the torqued part is gone
+                return True
+            if want != "torqued" and view.state != want:
                 return True
         return False
 

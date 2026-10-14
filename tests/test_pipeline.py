@@ -178,3 +178,107 @@ def test_decisions_and_offline_alerts_name_the_deciding_model(sop):
     assert msg["provider"] == "laya"
     core.on_status("offline", 2.0)
     assert any(m["type"] == "alert" and m["message"] == "Laya offline — using evidence only" for m in sent)
+
+
+# -- lug bolts: vision + torque results, end to end -------------------------------------------------------------------
+STAR = ["hole_1", "hole_3", "hole_5", "hole_2", "hole_4"]
+
+
+class LugDetector:
+    """Wheel always; bolt on hole k from t = 1 + k; the wrench at `wrench[i][1]` during [T - 1, T + 0.5] around each
+    torque time T. `missing` holes never get a bolt."""
+
+    def __init__(self, sop, wrench: list[tuple[float, str]], missing=()):
+        self.sop, self.wrench, self.missing = sop, wrench, set(missing)
+
+    def detect(self, frame):
+        dets = [Detection("hub", CHASSIS, 0.95, None)]
+        for k in range(1, 6):
+            slot = f"hole_{k}"
+            spec = self.sop.layout.slots[slot]
+            cls = "lug_bolt_gold" if frame.t >= 1 + k and slot not in self.missing else "hole_empty"
+            dets.append(det_at(cls, *spec.at, size=24))
+        for t, slot in self.wrench:
+            if t - 1 <= frame.t <= t + 0.5:
+                dets.append(det_at("torque_wrench", *self.sop.layout.slots[slot].at, size=20))
+        return dets
+
+    def reset(self):
+        pass
+
+
+class NeverActs:
+    provider = "stub"
+
+    async def ask(self, state, qs):
+        return JevAnswers("idle", 0.0, {"idle": 1.0}, 0.0, 0.0, 1.0, "stub")
+
+
+async def lug_run(lug_sop, order=STAR, missing=(), torque=None, wrench=None):
+    from sopvision.sop.torque import TorqueResult
+
+    times = [10.0 + 3 * i for i in range(len(order))]
+    wrench = wrench if wrench is not None else list(zip(times, order))
+    torque = torque if torque is not None else [TorqueResult(t, True, 110.0) for t in times]
+    return await run_lockstep(lug_sop, ScriptedSource(26), LugDetector(lug_sop, wrench, missing), NeverActs(),
+                              torque=torque)
+
+
+def kinds(res):
+    return [a.kind for a in res.alerts]
+
+
+async def test_lug_bolts_correct_run_completes_every_step_in_order(lug_sop):
+    res = await lug_run(lug_sop)
+    assert [s.status for s in res.steps] == ["done"] * 10
+    assert {s.id: s.source for s in res.steps if s.id.startswith("torque")} == {f"torque_{k}": "torque" for k in range(1, 6)}
+    assert not [a for a in res.alerts if a.level in ("warning", "violation")]
+    assert kinds(res).count("torque") == 5
+
+
+async def test_lug_bolts_out_of_sequence_torque_is_a_violation(lug_sop):
+    res = await lug_run(lug_sop, order=["hole_1", "hole_2", "hole_3", "hole_4", "hole_5"])  # clockwise, not star
+    violations = [a.message for a in res.alerts if a.kind == "order_violation"]
+    assert "torque_2 completed before torque_3, torque_5" in violations
+
+
+async def test_lug_bolts_torque_on_a_hole_with_no_nut(lug_sop):
+    res = await lug_run(lug_sop, missing={"hole_5"})
+    assert "torque_without_part" in kinds(res)
+    assert next(s for s in res.steps if s.id == "torque_5").status != "done"
+
+
+async def test_lug_bolts_torque_not_reached_and_unattributed(lug_sop):
+    from sopvision.sop.torque import TorqueResult
+
+    times = [10.0 + 3 * i for i in range(5)]
+    torque = [TorqueResult(times[0], False, 60.0)] + [TorqueResult(t, True, 110.0) for t in times[1:]]
+    res = await lug_run(lug_sop, torque=torque, wrench=list(zip(times, STAR))[:4])  # wrench never seen for the last
+    assert "torque_not_reached" in kinds(res) and "torque_unattributed" in kinds(res)
+
+
+async def test_lug_bolts_torque_results_are_in_the_run_log(lug_sop, tmp_path):
+    from sopvision.sop.torque import TorqueResult
+
+    det = LugDetector(lug_sop, [(10.0, "hole_1")])
+    await run_lockstep(lug_sop, ScriptedSource(12), det, NeverActs(), RunLog(tmp_path / "r.jsonl"),
+                       torque=[TorqueResult(10.0, True, 110.0)])
+    (ev,) = [e for e in read_events(tmp_path / "r.jsonl") if e.type == "torque"]
+    assert ev.payload["slot"] == "hole_1" and ev.payload["accepted"] is True
+
+
+def test_live_torque_is_timed_at_the_latest_frame_plus_the_camera_delay(lug_sop, tmp_path):
+    ctx = RunContext("run1", lug_sop, SourceSpec(id="rtsp:0", kind="rtsp", label="cam"), None, lambda m: None, FrameBuffer())
+    run = LiveRun(ctx, ScriptedSource(1), LugDetector(lug_sop, []), NeverActs(), camera_delay=0.4)
+    run.core.last_t = 12.0
+    assert run.torque(True, 110.0) == 12.4
+    assert run.core.torque._pending[0].t == 12.4
+
+
+def test_a_replayed_recording_brings_its_torque_log(lug_sop, tmp_path):
+    log = tmp_path / "torque.csv"
+    log.write_text("time_s,ok,torque_nm\n12.5,1,110\n20.0,0,\n")
+    spec = SourceSpec(id="recording:lug_bolts:r1", kind="file", label="r1", path=tmp_path / "v.mp4", torque_log=log)
+    ctx = RunContext("run1", lug_sop, spec, None, lambda m: None, FrameBuffer())
+    run = LiveRun(ctx, ScriptedSource(1), LugDetector(lug_sop, []), NeverActs())
+    assert [(r.t, r.ok) for r in run.core.torque._pending] == [(12.5, True), (20.0, False)]

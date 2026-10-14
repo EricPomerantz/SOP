@@ -1,6 +1,8 @@
 """When to ask Jev, and delivering its answers (spec §7.1, §7.4).
 
-Calls happen on scene changes (throttled to one per 0.25 s) and every 2 s while hands are visible.
+Calls happen on scene changes (throttled to one per 0.25 s), every 2 s while hands are visible, and every 5 s while
+nothing changes and no hands are visible, once a first call has been made: an unchanged scene is how idle looks, and
+without a re-ask the model would never see it go on long enough to call it idle.
 Live mode keeps at most one call in flight and never blocks the caller; lockstep mode (eval)
 awaits each call and applies the answer a fixed 0.5 s later in video time, so results don't
 depend on how fast the machine or the network is.
@@ -46,11 +48,13 @@ class JevDecider:
     def __init__(self, sop: SopConfig, client, mode: Literal["live", "lockstep"],
                  on_decision: Callable[[Decision], None],
                  on_status: Callable[[Literal["online", "offline"], float], None],
-                 throttle: float = 0.25, heartbeat: float = 2.0, lockstep_latency: float = 0.5,
+                 throttle: float = 0.25, heartbeat: float = 2.0, idle_heartbeat: float = 5.0,
+                 lockstep_latency: float = 0.5,
                  shadow=None, on_comparison: Callable[[dict], None] | None = None, clock=time.perf_counter):
         self.sop, self.client, self.mode = sop, client, mode
         self.on_decision, self.on_status = on_decision, on_status
         self.throttle, self.heartbeat, self.lockstep_latency = throttle, heartbeat, lockstep_latency
+        self.idle_heartbeat = idle_heartbeat
         self.shadow, self.on_comparison, self._clock = shadow, on_comparison or (lambda record: None), clock
         self._scene: SceneState | None = None
         self._recent: deque[SceneEvent] = deque(maxlen=RECENT_EVENTS)
@@ -81,7 +85,11 @@ class JevDecider:
         if self._scene is None or self._active is None:
             return False
         since = now - self._last_call
-        return (self._unsent > 0 and since >= self.throttle) or (bool(self._scene.hands) and since >= self.heartbeat)
+        if self._unsent > 0 and since >= self.throttle:
+            return True
+        if self._scene.hands:
+            return since >= self.heartbeat
+        return self._last_call > -math.inf and since >= self.idle_heartbeat
 
     def _mark_due(self, now: float) -> None:
         """Remember when enough context first existed for a call: the start of end-to-end latency."""

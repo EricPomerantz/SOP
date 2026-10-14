@@ -14,6 +14,8 @@ export function TopBar({ title, version, source, elapsed, status, running }: Pro
         {source && <span className="muted">· {source}</span>}
       </div>
       <div className="topbar-right">
+        <a className="muted" href="#/record">Record</a>
+        <a className="muted" href="#/latency">Camera latency</a>
         <span className="timer" aria-label="Run time">{clock(elapsed)}</span>
         <span role="status" className={`pill pill-${running || status !== "On track" ? tone : "idle"}`}>
           {running || status !== "On track" ? status : "No run"}

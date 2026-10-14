@@ -34,3 +34,20 @@ def test_rtsp_close_leaves_release_to_the_reading_thread():
     src.close()
     assert not cap.released
     assert list(stream) == [] and cap.released
+
+
+def test_low_latency_options_apply_only_while_opening(monkeypatch):
+    import os
+
+    from sopvision.sources.rtsp import LOW_LATENCY, RtspSource
+
+    monkeypatch.delenv("OPENCV_FFMPEG_CAPTURE_OPTIONS", raising=False)
+    seen = []
+
+    def open_capture(url):
+        seen.append(os.environ.get("OPENCV_FFMPEG_CAPTURE_OPTIONS"))
+        return type("Cap", (), {"isOpened": lambda self: False, "release": lambda self: None})()
+
+    src = RtspSource("rtsp://x", open_capture=open_capture, sleep=lambda s: src.close(), capture_options=LOW_LATENCY)
+    list(src.frames())
+    assert seen == [LOW_LATENCY] and "OPENCV_FFMPEG_CAPTURE_OPTIONS" not in os.environ

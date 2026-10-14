@@ -7,6 +7,7 @@ services:
     env_file: .env
     environment:
       SOP_DATA_ROOT: /data/server_fan
+      DATASETS_DIR: /datasets
       SOPVISION_IN_CONTAINER: "1"
       DECISION_MODE: ${DECISION_MODE:-jev}  # from the shell or .env: jev | decider | laya | compare
       COMPARE_SHADOW: ${COMPARE_SHADOW:-decider}  # compare mode's shadow model: decider | laya
@@ -22,6 +23,7 @@ services:
       - ./sops:/app/sops:ro
       - ./data/scenarios:/app/data/scenarios:ro
       - ./data/training:/app/data/training  # fine-tuning captures and datasets (scripts/capture_requests.py)
+      - ./datasets:/datasets  # timeline-format datasets: new SOPs' recordings (writable: the dashboard records here)
     deploy:
       resources:
         reservations:
@@ -130,5 +132,40 @@ services:
               count: all
               capabilities: [gpu]
 
+  # Detector training (Ultralytics, on the GPU) in the app's image:
+  #   docker compose --profile training run --rm trainer train --data data/lug_bolts/yolo/dataset.yaml --out models/lug_bolts
+  trainer:
+    profiles: [training]
+    image: sopvision:latest
+    entrypoint: ["python", "-m", "training.train"]
+    shm_size: 4gb  # the data loader's worker processes share batches through /dev/shm (Docker's default is 64 MB)
+    volumes:
+      - ./training:/app/training:ro
+      - ./data:/app/data  # datasets in, Ultralytics run folders out (data/ultralytics)
+      - ./models:/app/models  # best.pt and metrics.json land here
+      - ./yolo26m.pt:/app/yolo26m.pt:ro  # pretrained starting point
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  # Label Studio for reviewing detector labels: `docker compose --profile labelling up -d labelstudio`, then
+  # http://localhost:8080. Frames are served from ./data (tasks from training/labelstudio.py with --doc-root data).
+  labelstudio:
+    profiles: [labelling]
+    image: heartexlabs/label-studio:1.15.0
+    ports:
+      - "8080:8080"
+    environment:
+      LABEL_STUDIO_LOCAL_FILES_SERVING_ENABLED: "true"
+      LABEL_STUDIO_LOCAL_FILES_DOCUMENT_ROOT: /label-studio/files
+    volumes:
+      - labelstudio_data:/label-studio/data  # projects, annotations, the login
+      - ./data:/label-studio/files:ro
+
 volumes:
   hf_cache:
+  labelstudio_data:

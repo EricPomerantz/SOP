@@ -1,0 +1,62 @@
+sop: lug_bolts_torque
+name: Wheel lug bolts
+version: 1
+description: Put five lug bolts into the wheel hub, then torque them with the torque wrench in star sequence 1-3-5-2-4.
+
+# DRAFT: moves to sops/ once the detector is trained (the app needs weights for every SOP it loads).
+detector:
+  weights: models/lug_bolts/best.pt
+  # Bolts are labelled by colour from the start: this SOP accepts any colour in any hole, and the coloured stage later
+  # only changes `filled_by` per hole (e.g. hole_3: lug_bolt_red), with no relabelling.
+  classes: [hub, hole_empty, lug_bolt_blue, lug_bolt_green, lug_bolt_red, lug_bolt_gold, torque_wrench, hand]
+
+layout:
+  # The hub is fixed (the wheel turns on it, its bolt holes don't), so hole positions are fixed relative to it.
+  # Label `hub` as a square around the five bolt holes with about a bolt head's width of margin; hole coordinates are
+  # normalised (0-1) within that box, so the wheel's rotation and spokes don't matter.
+  anchor: hub
+  match_radius: 0.15               # neighbouring holes are ~0.4 apart in hub-box units
+  tools: [torque_wrench]           # located at the nearest hole, never treated as a part
+  # The camera is mounted on the torque frame and shakes while torquing (measured 2026-10-09: typically 2-6 px, up to
+  # 35 px; holes are ~100 px apart). Follow the hub almost frame by frame so the hole grid moves with the image.
+  anchor_follow: 0.7
+  # The detector sometimes reads a seated gold bolt as an empty hole for several seconds (up to 6.2 s on hole 2 in
+  # correct5, 2026-10-12). A bolt only counts as gone after 8 s of empty readings, so removal alerts come ~8 s late.
+  removal_seconds: 8.0
+  # Holes numbered clockwise from the top so that 1-3-5-2-4 is the star pattern. Positions: the median of the 355
+  # labelled frames (2026-10-12), in hub-box units (the labelled hub box is 240 px square).
+  slots:
+    hole_1: {at: [0.601, 0.155], filled_by: [lug_bolt_blue, lug_bolt_green, lug_bolt_red, lug_bolt_gold], empty_as: hole_empty}
+    hole_2: {at: [0.86, 0.5], filled_by: [lug_bolt_blue, lug_bolt_green, lug_bolt_red, lug_bolt_gold], empty_as: hole_empty}
+    hole_3: {at: [0.62, 0.823], filled_by: [lug_bolt_blue, lug_bolt_green, lug_bolt_red, lug_bolt_gold], empty_as: hole_empty}
+    hole_4: {at: [0.205, 0.731], filled_by: [lug_bolt_blue, lug_bolt_green, lug_bolt_red, lug_bolt_gold], empty_as: hole_empty}
+    hole_5: {at: [0.197, 0.307], filled_by: [lug_bolt_blue, lug_bolt_green, lug_bolt_red, lug_bolt_gold], empty_as: hole_empty}
+
+steps:
+  - {id: place_1, label: Bolt 1, text: Thread a lug bolt into hole 1., evidence: {hole_1: installed}}
+  - {id: place_2, label: Bolt 2, text: Thread a lug bolt into hole 2., evidence: {hole_2: installed}}
+  - {id: place_3, label: Bolt 3, text: Thread a lug bolt into hole 3., evidence: {hole_3: installed}}
+  - {id: place_4, label: Bolt 4, text: Thread a lug bolt into hole 4., evidence: {hole_4: installed}}
+  - {id: place_5, label: Bolt 5, text: Thread a lug bolt into hole 5., evidence: {hole_5: installed}}
+  - {id: torque_1, label: Torque 1, text: Torque the lug bolt in hole 1 with the torque wrench., evidence: {hole_1: torqued}}
+  - {id: torque_3, label: Torque 3, text: Torque the lug bolt in hole 3 with the torque wrench., evidence: {hole_3: torqued}}
+  - {id: torque_5, label: Torque 5, text: Torque the lug bolt in hole 5 with the torque wrench., evidence: {hole_5: torqued}}
+  - {id: torque_2, label: Torque 2, text: Torque the lug bolt in hole 2 with the torque wrench., evidence: {hole_2: torqued}}
+  - {id: torque_4, label: Torque 4, text: Torque the lug bolt in hole 4 with the torque wrench., evidence: {hole_4: torqued}}
+
+order: groups
+groups:
+  - [place_1, place_2, place_3, place_4, place_5]            # any order
+  - sequence: [torque_1, torque_3, torque_5, torque_2, torque_4]   # star pattern, in this order
+
+off_sop: Any action that is not one of the steps above.
+idle: No one is working on the wheel
+
+decisions:
+  accept_confidence: 0.8
+  hold_seconds: 1.0
+  evidence_only_after: 1.0         # a bolt must be seen in its hole for 1 s
+
+dataset:
+  format: timeline                 # docs/lug-bolts-poc.md: runs/<id>/{video.mp4, steps.csv, torque.csv} + splits.yaml
+  dir: lug_bolts                   # under DATASETS_DIR (Docker: ./datasets mounted at /datasets)

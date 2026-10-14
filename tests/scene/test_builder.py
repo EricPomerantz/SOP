@@ -155,3 +155,114 @@ def test_held_classes_come_from_the_slots(sop):
         "layout": sop.layout.model_copy(update={"slots": slots})})
     s, _ = SceneBuilder(other).update(0.0, [chassis(), det_at("battery", 0.8, 0.9, size=50), det_at("hand", 0.84, 0.9, size=50)])
     assert s.held == ["battery"]
+
+
+# -- tools and torque (lug bolts SOP) -------------------------------------------------------------------------------
+def hub():
+    return Detection("hub", CHASSIS, 0.95, None)
+
+
+def bolt(sop, slot):
+    return at(sop, slot, "lug_bolt_gold")
+
+
+def test_server_fan_state_has_no_tool_or_torque_keys(sop):
+    b = SceneBuilder(sop)
+    s, _ = settle_empty(b, sop)
+    d = s.to_jev_dict()
+    assert "tools" not in d and all("torqued" not in v for v in d["slots"].values())
+
+
+def test_tool_is_located_at_a_slot_and_never_matched_as_a_part(lug_sop):
+    b = SceneBuilder(lug_sop)
+    b.update(0.0, [hub(), bolt(lug_sop, "hole_3")])
+    s, ev = b.update(0.6, [hub(), bolt(lug_sop, "hole_3"), at(lug_sop, "hole_3", "torque_wrench", size=30)])
+    assert [(t.tool, t.near) for t in s.tools] == [("torque_wrench", "hole_3")]
+    assert s.slots["hole_3"].state == "installed" and s.held == []
+    assert [e.describe() for e in ev if e.kind == "tool_entered"] == ["0.6s torque_wrench at hole_3"]
+    assert s.to_jev_dict()["tools"] == [{"tool": "torque_wrench", "near": "hole_3"}]
+    s, ev = b.update(1.0, [hub(), bolt(lug_sop, "hole_3")])
+    assert s.tools == [] and [e.describe() for e in ev if e.kind == "tool_left"] == ["1.0s torque_wrench left hole_3"]
+
+
+def test_torqued_flag_shows_until_the_part_leaves(lug_sop):
+    b = SceneBuilder(lug_sop)
+    b.update(0.0, [hub(), bolt(lug_sop, "hole_1")])
+    b.update(0.6, [hub(), bolt(lug_sop, "hole_1")])
+    b.mark_torqued("hole_1")
+    s, _ = b.update(1.0, [hub(), bolt(lug_sop, "hole_1")])
+    assert s.slots["hole_1"].torqued and s.to_jev_dict()["slots"]["hole_1"]["torqued"] is True
+    b.update(1.2, [hub(), at(lug_sop, "hole_1")])  # bolt gone: hole seen empty
+    s, _ = b.update(1.8, [hub(), at(lug_sop, "hole_1")])
+    assert s.slots["hole_1"].state == "installed" and s.slots["hole_1"].torqued  # not yet: layout.removal_seconds
+    s, _ = b.update(1.3 + lug_sop.layout.removal_seconds, [hub(), at(lug_sop, "hole_1")])
+    assert s.slots["hole_1"].state == "empty" and not s.slots["hole_1"].torqued
+
+
+def test_a_misread_shorter_than_the_removal_wait_keeps_the_bolt_and_its_torque(lug_sop):
+    b = SceneBuilder(lug_sop)
+    b.update(0.0, [hub(), bolt(lug_sop, "hole_2")])
+    b.update(0.6, [hub(), bolt(lug_sop, "hole_2")])
+    b.mark_torqued("hole_2")
+    for t in (1.0, 3.0, 6.0):  # the detector calls the gold bolt an empty hole for 6 s
+        s, ev = b.update(t, [hub(), at(lug_sop, "hole_2")])
+        assert s.slots["hole_2"].state == "installed" and not [e for e in ev if e.kind == "slot_changed"]
+    s, _ = b.update(6.5, [hub(), bolt(lug_sop, "hole_2")])
+    s, _ = b.update(7.5 + lug_sop.layout.removal_seconds, [hub(), bolt(lug_sop, "hole_2")])
+    assert s.slots["hole_2"].state == "installed" and s.slots["hole_2"].torqued
+
+
+def test_without_removal_seconds_a_part_leaves_after_the_usual_settle(sop):
+    assert sop.layout.removal_seconds is None
+    b = SceneBuilder(sop)
+    fan = at(sop, "fan_bay_1", "fan")
+    b.update(0.0, [chassis(), fan])
+    b.update(0.6, [chassis(), fan])
+    b.update(1.0, [chassis(), at(sop, "fan_bay_1")])
+    s, _ = b.update(1.5, [chassis(), at(sop, "fan_bay_1")])
+    assert s.slots["fan_bay_1"].state == "empty"
+
+
+def test_any_listed_bolt_colour_fills_a_hole(lug_sop):
+    b = SceneBuilder(lug_sop)
+    dets = [hub(), at(lug_sop, "hole_1", "lug_bolt_red"), at(lug_sop, "hole_2", "lug_bolt_gold"), at(lug_sop, "hole_3")]
+    b.update(0.0, dets)
+    s, _ = b.update(0.6, dets)
+    assert (s.slots["hole_1"].state, s.slots["hole_2"].state, s.slots["hole_3"].state) == ("installed", "installed", "empty")
+
+
+def test_fast_anchor_follow_keeps_holes_on_a_shaking_camera(lug_sop):
+    from tests.helpers import det_at
+
+    def shaken(shift):  # the whole image moves right by `shift` hub-box widths
+        box = (CHASSIS[0] + shift * 1000, CHASSIS[1], CHASSIS[2] + shift * 1000, CHASSIS[3])
+        spec = lug_sop.layout.slots["hole_1"]
+        return [Detection("hub", box, 0.95, None), det_at("lug_bolt_gold", *spec.at, chassis=box)]
+
+    def first_shaken_frame(sop):
+        b = SceneBuilder(sop)
+        for t in (0.0, 0.3, 0.6):
+            b.update(t, shaken(0.0))
+        s, _ = b.update(0.64, shaken(0.25))
+        return s.slots["hole_1"].state
+
+    slow = lug_sop.model_copy(update={"layout": lug_sop.layout.model_copy(update={"anchor_follow": 0.1})})
+    assert lug_sop.layout.anchor_follow == 0.7
+    assert first_shaken_frame(lug_sop) == "installed"  # the hole grid moved with the image
+    assert first_shaken_frame(slow) != "installed"  # the old smoothing lagged: the bolt fell outside its hole
+
+
+def test_server_fan_keeps_its_smoothing(sop):
+    assert sop.layout.anchor_follow == 0.1
+
+
+def test_a_slot_remembers_the_part_it_holds_until_it_empties(lug_sop):
+    b, box = SceneBuilder(lug_sop), (0.0, 0.0, 100.0, 100.0)
+    hub = Detection("hub", box, 0.95, None)
+    at = lug_sop.layout.slots["hole_1"].at
+    bolt = lambda cls: Detection(cls, (at[0] * 100 - 3, at[1] * 100 - 3, at[0] * 100 + 3, at[1] * 100 + 3), 0.9, None)
+    for i in range(10):
+        s, _ = b.update(i * 0.1, [hub, bolt("lug_bolt_gold" if i != 4 else "lug_bolt_red")])  # one misread frame
+    assert (s.slots["hole_1"].part, s.slots["hole_1"].box is not None) == ("lug_bolt_gold", True)
+    s, _ = b.update(1.0, [hub])  # nothing seen there and no hand: unknown, still holding the gold bolt
+    assert s.slots["hole_1"].part == "lug_bolt_gold"

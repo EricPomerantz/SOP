@@ -1,4 +1,4 @@
-import { act, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import App from "./App";
 import type { Api } from "./api";
 import stream from "./fixtures/run_stream.json";
@@ -73,4 +73,20 @@ test("before any run the strip names the configured model, not Jev", async () =>
   render(<App api={fakeApi(null, "laya")} connect={fakeSocket().connect} />);
   expect(await screen.findByLabelText("Laya now")).toHaveTextContent("Waiting for the first decision");
   expect(screen.queryByLabelText("Jev now")).toBeNull();
+});
+
+
+test("torque buttons show during a run of an SOP with a torque tool, and post to the run", async () => {
+  const a = fakeApi(RUNNING);
+  const torqueSop = { ...SOP, torque: true };
+  const runTorque = vi.fn(async () => ({ t: 12.3 }));
+  render(<App api={{ ...a, getSops: async () => [torqueSop], runTorque }} connect={fakeSocket().connect} />);
+  fireEvent.click(await screen.findByRole("button", { name: /Torque reached/ }));
+  await waitFor(() => expect(runTorque).toHaveBeenCalledWith("r1", true));
+});
+
+test("no torque buttons for an SOP without a torque tool", async () => {
+  render(<App api={{ ...fakeApi(RUNNING), runTorque: vi.fn() }} connect={fakeSocket().connect} />);
+  await screen.findByLabelText("Jev now");
+  expect(screen.queryByRole("button", { name: /Torque reached/ })).toBeNull();
 });

@@ -32,6 +32,10 @@ class NotPausableError(RuntimeError):
     pass
 
 
+class NoTorqueToolError(RuntimeError):
+    pass
+
+
 class RunInfo(BaseModel):
     run_id: str
     sop: str
@@ -74,6 +78,7 @@ def default_run_factory(settings: Settings) -> Callable:
     from sopvision.decide.providers import clients_for
     from sopvision.perception.detector import YoloDetector
     from sopvision.pipeline import LiveRun
+    from sopvision.sources.latency import camera_delay
     from sopvision.sources.registry import open_source
 
     detectors: dict[str, YoloDetector] = {}
@@ -85,7 +90,7 @@ def default_run_factory(settings: Settings) -> Callable:
         detector = detectors[sop.sop]
         detector.reset()
         client, shadow = clients_for(settings)
-        return LiveRun(ctx, open_source(spec, settings), detector, client, shadow)
+        return LiveRun(ctx, open_source(spec, settings), detector, client, shadow, camera_delay=camera_delay(spec, settings))
 
     return factory
 
@@ -99,6 +104,7 @@ class RunManager:
         self.info: RunInfo | None = None
         self.spec: SourceSpec | None = None
         self.last_decision: dict | None = None
+        self.recording = None  # RecordingSession while recording (server/recording.py)
 
     def broadcast(self, msg: dict) -> None:
         if msg.get("type") == "decision":
@@ -112,6 +118,8 @@ class RunManager:
     async def start(self, sop_id: str, source_id: str) -> RunInfo:
         if self._active():
             raise RunConflictError("A run is already in progress. Stop it first.")
+        if self.recording is not None:
+            raise RunConflictError("A recording is in progress. Stop it first.")
         sop = self.sops.get(sop_id)
         spec = next((s for s in list_sources(self.settings) if s.id == source_id), None)
         if spec is None and source_id.startswith("webcam:") and source_id[7:].isdigit():
@@ -137,6 +145,79 @@ class RunManager:
 
     async def stop(self, run_id: str) -> None:
         await self._require(run_id).stop()
+
+    def torque(self, run_id: str, ok: bool, torque_nm: float | None) -> float:
+        run = self._require(run_id)
+        if not self.sops[self.info.sop].layout.tools:
+            raise NoTorqueToolError(f"SOP {self.info.sop} has no torque tool, so it takes no torque results.")
+        return run.torque(ok, torque_nm)
+
+    # -- recording (no detector: for collecting a new SOP's data) --------------------------------------------------
+    def recording_sops(self) -> list[dict]:
+        """SOP files whose dataset is in the timeline format, drafts included (they have no detector yet)."""
+        return self._scan_sops()[0]
+
+    def recording_sop_errors(self) -> list[dict]:
+        """SOP files that don't load, with the reason: shown on the Record page instead of silently leaving them out."""
+        return self._scan_sops()[1]
+
+    def _scan_sops(self) -> tuple[list[dict], list[dict]]:
+        from sopvision.config import load_sop
+        from sopvision.recordings import dataset_root
+
+        files = sorted(self.settings.sops_dir.glob("*.yaml")) + sorted((self.settings.sops_dir / "drafts").glob("*.yaml"))
+        out, errors = [], []
+        for path in files:
+            try:
+                sop = load_sop(path)
+            except ConfigError as e:
+                errors.append({"file": str(path), "error": str(e)})
+                continue
+            if sop.dataset.format == "timeline":
+                out.append({"file": str(path), "id": sop.sop, "name": sop.display_name,
+                            "dataset": str(dataset_root(sop, self.settings)), "torque": bool(sop.layout.tools)})
+        return out, errors
+
+    def start_recording(self, sop_file: str, source_id: str, split: str, name: str | None, fps: float = 25.0) -> dict:
+        from sopvision.config import load_sop
+        from sopvision.server.recording import RecordingSession
+
+        if self._active() or self.recording is not None:
+            raise RunConflictError("Stop the current run or recording first.")
+        allowed = {s["file"] for s in self.recording_sops()}
+        if sop_file not in allowed:
+            raise NotFoundError(f"Unknown SOP file {sop_file}")
+        spec = next((s for s in list_sources(self.settings) if s.id == source_id), None)
+        if spec is None:
+            raise NotFoundError(f"Unknown source {source_id}")
+        if spec.kind == "file":
+            raise ConfigError("Record from a live camera, not a video file.")
+        check_available(spec, self.settings)
+        run_id = name or time.strftime("r%Y%m%d-%H%M%S")
+        session = RecordingSession(self.settings, load_sop(Path(sop_file)), sop_file, spec, split, run_id, self.frames, fps)
+        session.start()
+        self.recording = session
+        return session.status()
+
+    def recording_torque(self, ok: bool, torque_nm: float | None) -> float:
+        if self.recording is None:
+            raise NotFoundError("No recording in progress")
+        t = self.recording.torque(ok, torque_nm)
+        if t is None:
+            raise NotPausableError("No frames recorded yet; wait for the video to start")
+        return t
+
+    def discard_recording(self) -> dict:
+        if self.recording is None:
+            raise NotFoundError("No recording in progress")
+        session, self.recording = self.recording, None
+        return session.discard()
+
+    def stop_recording(self) -> dict:
+        if self.recording is None:
+            raise NotFoundError("No recording in progress")
+        session, self.recording = self.recording, None
+        return session.stop()
 
     def control(self, run_id: str, action: str, speed: float | None) -> None:
         run = self._require(run_id)

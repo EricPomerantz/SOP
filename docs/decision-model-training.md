@@ -2,7 +2,8 @@
 
 The local decision models (Decider, Laya) read the same `/v1/systemone` requests Jev does. Zero-shot they fall well short
 of Jev on our SOP (`benchmarks/sop-244/RESULTS.md`), so the plan is to fine-tune one on decisions from our own recordings.
-This is the data pipeline; nothing has been trained yet.
+The commands below are for server fan; for another SOP add `--sop <file>` to the capture, build, freeze, probe and
+benchmark scripts (its recordings come from the SOP file's `dataset` section, see `sopvision/recordings.py`).
 
 ```bash
 # 1. Replay the train/validation recordings through the real detector + tracker and log every decision request (GPU, ~10 min)

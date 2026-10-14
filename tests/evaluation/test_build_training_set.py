@@ -41,13 +41,13 @@ def test_noise_changes_the_scene_not_the_record():
     assert any(c["request"]["state"] != rec["request"]["state"] for c in changed)
 
 
-def test_deviation_labels():
+def test_deviation_labels(sop):
     rec, lab = record(20.0), {"current_step": "fan_2", "active_step_done": False, "anomaly": False}
-    _, work = bts.deviation(rec, "out_of_order_work", lab)
+    _, work = bts.deviation(rec, "out_of_order_work", lab, sop)
     assert work == {"current_step": "fan_4", "active_step_done": False}
-    _, install = bts.deviation(rec, "out_of_order_install", lab)
+    _, install = bts.deviation(rec, "out_of_order_install", lab, sop)
     assert install == {"anomaly": True, "active_step_done": False}
-    _, idle = bts.deviation(rec, "idle_bench", lab)
+    _, idle = bts.deviation(rec, "idle_bench", lab, sop)
     assert idle == {"current_step": "idle", "anomaly": False, "active_step_done": False}
 
 

@@ -5,7 +5,8 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Literal
 
-EventType = Literal["run_started", "scene_event", "decision", "decision_comparison", "step_update", "alert", "run_summary"]
+EventType = Literal["run_started", "scene_event", "decision", "decision_comparison", "torque", "step_update", "alert",
+                    "run_summary"]
 
 
 class RunLogClosedError(RuntimeError):

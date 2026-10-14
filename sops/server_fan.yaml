@@ -79,3 +79,7 @@ decisions:
   hold_seconds: 1.0                # how long a judgment must persist
   evidence_only_after: 1.0         # mark done on evidence alone if Jev hasn't confirmed by then (eval-tuned from 3.0)
   hands_off_seconds: 0.5           # hands_off steps: part in place and untouched this long
+
+dataset:
+  format: clips                    # raw/Install_<n>.MP4 cut into {action}_Install_{run}_{occ}_{pos}.mp4 clips
+  actions: {1: fan_1, 2: fan_2, 3: fan_3, 4: fan_4, 5: fan_5, 6: fan_6, 7: psu_1, 8: psu_2, 9: cover, 10: off_sop}

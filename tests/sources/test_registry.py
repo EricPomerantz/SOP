@@ -38,3 +38,18 @@ def test_lists_test_runs_from_raw_videos(tmp_path):
 def test_open_file_source_uses_mode(tiny_video):
     src = open_source(SourceSpec(id="scenario:x", kind="file", label="x", path=tiny_video), Settings(), mode="lockstep")
     assert isinstance(src, FileSource) and src.mode == "lockstep"
+
+
+def test_lists_timeline_test_recordings_with_their_torque_logs(tmp_path):
+    root = tmp_path / "datasets" / "lug_bolts"
+    for run in ("correct1", "dev2", "train1"):
+        (root / "runs" / run).mkdir(parents=True)
+        (root / "runs" / run / "video.mp4").touch()
+    (root / "runs" / "dev2" / "torque.csv").write_text("time_s,ok,torque_nm\n3.0,1,\n")
+    (root / "splits.yaml").write_text("train: [train1]\nval: []\ntest: [correct1, dev2, missing]\n")
+    s = Settings(datasets_dir=tmp_path / "datasets", sop_data_root=tmp_path / "none", scenarios_dir=tmp_path / "none")
+    by_id = {spec.id: spec for spec in list_sources(s)}
+    assert {i for i in by_id if i.startswith("recording:")} == {"recording:lug_bolts:correct1", "recording:lug_bolts:dev2"}
+    assert by_id["recording:lug_bolts:dev2"].torque_log == root / "runs" / "dev2" / "torque.csv"
+    assert by_id["recording:lug_bolts:correct1"].torque_log is None
+    assert by_id["recording:lug_bolts:dev2"].label == "lug_bolts: dev2 (test recording)"

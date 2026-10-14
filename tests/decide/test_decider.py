@@ -68,6 +68,16 @@ async def test_no_calls_when_idle(sop):
     assert client.call_times == []
 
 
+async def test_a_quiet_scene_is_asked_again_every_5_s(sop):
+    d, client = make(sop, "lockstep")
+    d.observe(scene(0.0), [ev(0.0)], {}, "fan_1")
+    await d.poll(0.0)
+    for i in range(1, 121):
+        d.observe(scene(i * 0.1), [], {}, "fan_1")
+        await d.poll(i * 0.1)
+    assert client.call_times == pytest.approx([0.0, 5.0, 10.0])
+
+
 async def test_lockstep_delivers_after_latency(sop):
     d, _ = make(sop, "lockstep")
     d.observe(scene(1.0, hands=1), [], {"fan_1": "active"}, "fan_1")

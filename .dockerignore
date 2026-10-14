@@ -12,3 +12,5 @@ web/dist/
 .superpowers/
 weights/
 *.pt
+# Recordings for timeline-format SOP datasets (large videos)
+datasets/

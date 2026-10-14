@@ -5,10 +5,15 @@ does, but with a stub model that never acts: steps still complete on visual evid
 about are what a live run produces, without any model's opinion feeding back into them. Every request is written to a
 run log (`decision_comparison` events, with step updates), which scripts/build_training_set.py turns into labelled rows.
 
-    docker compose run --rm --entrypoint python sopvision scripts/capture_requests.py --out data/training/captures
+    docker compose run --rm --entrypoint python sopvision scripts/capture_requests.py --out data/training/captures \
+        [--sop sops/lug_bolts.yaml]
 
-Recordings: the train split with valid step timing, and the validation split. The test recordings (Install_12, 13), which
-the frozen benchmark comes from, are refused.
+Recordings (sopvision.recordings): the train and validation splits with a usable step timeline; a recording's torque log
+(torque.csv) is replayed with it. Test-split recordings are only captured with --benchmark, which captures nothing else:
+its logs are for scripts/freeze_benchmark.py, never for a training set (build_training_set.py refuses test sources).
+
+    docker compose run --rm --entrypoint python sopvision scripts/capture_requests.py --benchmark \
+        --sop sops/lug_bolts.yaml --out runs/capture-lug_bolts-test
 """
 
 import argparse
@@ -16,15 +21,14 @@ import asyncio
 import sys
 from pathlib import Path
 
-from sopvision.config import list_sops
-from sopvision.dataset import load_index
+from sopvision.config import SopConfig, list_sops, load_sop
 from sopvision.decide.types import JevAnswers
 from sopvision.pipeline import run_lockstep
+from sopvision.recordings import load_recordings
 from sopvision.settings import Settings
+from sopvision.sop.torque import read_torque_log
 from sopvision.sources.file import FileSource
 from sopvision.storage.runlog import RunLog
-
-TEST_RUNS = {12, 13}  # the frozen benchmark's recordings: never capture them for training
 
 
 class StubClient:
@@ -40,34 +44,40 @@ class StubClient:
         pass
 
 
-async def capture(settings: Settings, out: Path) -> None:
+async def capture(settings: Settings, sop: SopConfig, out: Path, only: set[str] | None = None,
+                  benchmark: bool = False) -> None:
     from sopvision.perception.detector import YoloDetector
 
-    sop = list_sops(settings.sops_dir)[0]
     detector = YoloDetector(sop.detector.weights, sop.detector.classes)
     out.mkdir(parents=True, exist_ok=True)
-    for run in load_index(settings.sop_data_root):
-        if run.run in TEST_RUNS or run.split == "test":
+    for rec in load_recordings(sop, settings):
+        if (rec.split == "test") != benchmark or (only and rec.id not in only):
             continue
-        if run.split == "train" and not run.timing_valid:
-            print(f"skip Install_{run.run}: step timing invalid, labels would be wrong", flush=True)
+        if not rec.valid:
+            print(f"skip {rec.id}: no usable step timeline, labels would be wrong", flush=True)
             continue
-        source = f"{run.split}:Install_{run.run}"
-        path = out / f"{run.split}-Install_{run.run}.jsonl"
+        path = out / f"{rec.split}-{rec.id}.jsonl"
         path.unlink(missing_ok=True)
         detector.reset()
+        torque = read_torque_log(rec.torque_log) if rec.torque_log else None
         # The shadow stub makes the run log carry each request as a decision_comparison event.
-        res = await run_lockstep(sop, FileSource(run.raw_path, mode="lockstep"), detector, StubClient("capture"),
-                                 runlog=RunLog(path), run_id=f"capture-{run.run}", source_id=source,
-                                 shadow=StubClient("capture-shadow"))
-        print(f"{source}: {len(res.comparisons)} requests -> {path}", flush=True)
+        res = await run_lockstep(sop, FileSource(rec.video, mode="lockstep"), detector, StubClient("capture"),
+                                 runlog=RunLog(path), run_id=f"capture-{rec.id}", source_id=rec.source_id,
+                                 shadow=StubClient("capture-shadow"), torque=torque)
+        print(f"{rec.source_id}: {len(res.comparisons)} requests -> {path}", flush=True)
 
 
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", type=Path, default=Path("data/training/captures"))
+    ap.add_argument("--sop", type=Path, default=None, help="SOP file (default: the first in sops/)")
+    ap.add_argument("--recording", action="append", help="only these recording ids (repeatable)")
+    ap.add_argument("--benchmark", action="store_true", help="capture the test recordings only, for a frozen benchmark")
     args = ap.parse_args()
-    asyncio.run(capture(Settings(), args.out))
+    settings = Settings()
+    sop = load_sop(args.sop) if args.sop else list_sops(settings.sops_dir)[0]
+    asyncio.run(capture(settings, sop, args.out, set(args.recording) if args.recording else None,
+                        args.benchmark))
     return 0
 
 

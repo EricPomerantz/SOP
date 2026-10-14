@@ -80,8 +80,8 @@ def start(c, source="test:Install_12"):
 
 
 def test_sops_list_steps_with_labels(client):
-    (sop,) = client.get("/sops").json()
-    assert sop["id"] == "server_fan_install" and sop["steps"][0] == {
+    sop = next(s for s in client.get("/sops").json() if s["id"] == "server_fan_install")
+    assert sop["steps"][0] == {
         "id": "fan_1", "label": "Fan 1", "text": "Install the first fan by connecting the connector, then pressing the fan in place."}
 
 
@@ -182,7 +182,8 @@ def test_back_to_back_runs_get_their_own_ids_and_logs(client):
 
 
 def test_sops_carry_a_display_name(client):
-    assert client.get("/sops").json()[0]["name"] == "Server fan install"
+    names = {s["id"]: s["name"] for s in client.get("/sops").json()}
+    assert names["server_fan_install"] == "Server fan install" and names["lug_bolts_torque"] == "Wheel lug bolts"
 
 
 def test_run_info_names_the_deciding_model(tmp_path):
@@ -197,3 +198,42 @@ def test_run_info_names_the_deciding_model(tmp_path):
 def test_config_names_the_deciding_model_before_any_run(tmp_path):
     with make_client(tmp_path, decision_mode="laya") as c:
         assert c.get("/config").json() == {"decision_model": "laya", "decision_mode": "laya"}
+
+
+def test_torque_results_need_a_run_and_a_sop_with_a_torque_tool(client):
+    assert client.post("/runs/nope/torque", json={"ok": True}).status_code == 404
+    run_id = start(client).json()["run_id"]
+    r = client.post(f"/runs/{run_id}/torque", json={"ok": True, "torque_nm": 110})
+    assert r.status_code == 409 and "no torque tool" in r.json()["detail"]
+
+
+def test_latency_clock_and_measure_guards(client):
+    assert client.get("/latency/clock").json()["now_ms"] > 1.7e12
+    assert client.post("/latency/measure", json={"source_id": "test:Install_12"}).status_code == 400  # a video
+    assert client.post("/latency/measure", json={"source_id": "rtsp:9"}).status_code == 404
+    start(client)
+    assert client.post("/latency/measure", json={"source_id": "rtsp:0"}).status_code == 409  # a run is going
+
+
+def test_recording_lists_timeline_sops_and_guards_its_inputs(client):
+    sops = client.get("/recording/sops").json()
+    assert [s["id"] for s in sops] == ["lug_bolts_torque"] and sops[0]["torque"] is True
+    assert client.get("/recording").json() is None
+    body = {"sop_file": sops[0]["file"], "source_id": "test:Install_12"}
+    assert client.post("/recording/start", json=body).status_code == 400  # a video file, not a camera
+    assert client.post("/recording/start", json=body | {"sop_file": "sops/server_fan.yaml"}).status_code == 404
+    assert client.post("/recording/torque", json={"ok": True}).status_code == 404  # nothing recording
+    assert client.post("/recording/stop").status_code == 404
+    assert client.post("/recording/discard").status_code == 404
+
+
+def test_broken_sop_files_are_reported_not_hidden(tmp_path):
+    drafts = tmp_path / "sops" / "drafts"
+    drafts.mkdir(parents=True)
+    (drafts / "broken.yaml").write_text(
+        Path("sops/lug_bolts.yaml").read_text(encoding="utf-8").replace("anchor_follow: 0.7", "anchor_follw: 0.7"),
+        encoding="utf-8")
+    with make_client(tmp_path, sops_dir=tmp_path / "sops") as c:
+        assert c.get("/recording/sops").json() == []
+        (err,) = c.get("/recording/sop-errors").json()
+        assert err["file"].endswith("broken.yaml") and "anchor_follw" in err["error"]

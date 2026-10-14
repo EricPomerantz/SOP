@@ -4,6 +4,7 @@ import { Checklist } from "./components/Checklist";
 import { Controls } from "./components/Controls";
 import { EventLog } from "./components/EventLog";
 import { JevStrip } from "./components/JevStrip";
+import { TorqueButtons } from "./components/TorqueButtons";
 import { Timeline } from "./components/Timeline";
 import { TopBar } from "./components/TopBar";
 import { VideoPanel } from "./components/VideoPanel";
@@ -81,6 +82,12 @@ export default function App({ api = httpApi, connect = connectSocket }: Props) {
         <Checklist steps={state.steps} decision={state.decision} />
       </div>
       <JevStrip decision={state.decision} labels={labels} jevOffline={state.jevOffline} model={state.model} />
+      {running && sop?.torque && run && api.runTorque && (
+        <TorqueButtons onPress={async (ok) => {
+          const { t } = await api.runTorque!(run.run_id, ok);
+          return `${ok ? "Torque reached" : "Not reached"} at ${t.toFixed(1)} s`;
+        }} />
+      )}
       <Timeline segments={state.timeline} offSopMarks={state.offSopMarks} elapsed={state.elapsed} labels={labels} />
       <EventLog entries={state.log} />
       <Controls

@@ -27,9 +27,14 @@ class Settings(BaseSettings):
     laya_model: str = "english"  # english | multilingual | typed-decisions
     laya_max_len: int | None = None  # token budgets; None = the checkpoint's own (english 512 / 192)
     laya_head_max_len: int | None = None
-    sop_data_root: Path = Path("sop-sample-training-data/server_fan")
+    sop_data_root: Path = Path("sop-sample-training-data/server_fan")  # the server_fan (clips) dataset
+    datasets_dir: Path = Path("datasets")  # timeline-format datasets (new SOPs, recordings) live in <datasets_dir>/<dir>
     sopvision_in_container: bool = False
     sopvision_rtsp_urls: Annotated[list[str], NoDecode] = []
+    rtsp_low_latency: bool = True  # open RTSP streams with FFmpeg's low-buffering options
+    # How far a live camera's frames trail reality, for timing torque results. A camera measured with the latency
+    # check (dashboard /#/latency) uses its measured value instead (runs/camera_latency.json).
+    camera_delay_ms: float = 0.0
     sops_dir: Path = Path("sops")
     runs_dir: Path = Path("runs")
     scenarios_dir: Path = Path("data/scenarios")

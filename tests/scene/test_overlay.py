@@ -16,12 +16,28 @@ def slot_pixel(u, v):
     return int(x1 + u * (x2 - x1)), int(y1 + v * (y2 - y1))
 
 
-def test_slot_colours_by_state(sop):
-    states = {"fan_bay_1": "installed", "fan_bay_2": "empty", "fan_bay_3": "occluded"}
-    img = draw_overlay(np.zeros((1080, 1920, 3), np.uint8), scene_with(states), [], sop, OverlayStats(30, 6, 140))
+def test_slots_are_outlined_in_their_state_colour_and_the_part_stays_visible(sop):
+    slots = {"fan_bay_1": SlotView("installed", 0.9, "installed"), "fan_bay_2": SlotView("empty", 0.9, "empty"),
+             "fan_bay_3": SlotView("occluded")}
+    s = SceneState(3, 1.0, True, 0.95, slots, [], [], CHASSIS_PX)
+    img = draw_overlay(np.zeros((1080, 1920, 3), np.uint8), s, [], sop, OverlayStats(30, 6, 140))
+    ring = 24  # 12 px per 540 rows of frame, with no detection box to size it
     for slot, colour in (("fan_bay_1", (0, 200, 0)), ("fan_bay_2", (160, 160, 160)), ("fan_bay_3", (0, 191, 255))):
         x, y = slot_pixel(*sop.layout.slots[slot].at)
-        assert tuple(int(c) for c in img[y, x]) == colour
+        assert not img[y, x].any()  # not filled: the part under it is still visible
+        assert tuple(int(c) for c in img[y, x + ring]) == colour
+
+
+def test_a_part_named_for_a_colour_is_ringed_in_that_colour(sop):
+    from sopvision.scene.overlay import PART_COLOURS, part_colour
+
+    assert part_colour("lug_bolt_gold") == ("gold", PART_COLOURS["gold"])
+    assert part_colour("fan") == (None, (0, 200, 0))
+    box = (900.0, 500.0, 940.0, 540.0)  # a 40 px bolt: ring radius 20 + 6
+    s = SceneState(3, 1.0, True, 0.95, {"fan_bay_1": SlotView("installed", 0.9, "installed", part="lug_bolt_red",
+                                                                box=box)}, [], [], CHASSIS_PX)
+    img = draw_overlay(np.zeros((1080, 1920, 3), np.uint8), s, [], sop, OverlayStats(30, 6, 140))
+    assert tuple(int(c) for c in img[520, 920 + 26]) == PART_COLOURS["red"]
 
 
 def test_overlay_leaves_input_untouched_and_handles_small_frames(sop):

@@ -28,3 +28,5 @@ web/dist/
 # Local corporate CA certs for Docker builds (docker/decider.Dockerfile)
 docker/certs/*
 !docker/certs/.gitkeep
+# Recordings for timeline-format SOP datasets (large videos)
+datasets/

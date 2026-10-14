@@ -72,3 +72,46 @@ def test_anchor_must_be_a_detector_class(tmp_path):
 
 def test_display_name(sop):
     assert sop.name == "Server fan install"
+
+
+def test_sequence_groups_order_steps_within_the_group(sop):
+    from sopvision.config import SequenceGroup
+
+    psus_then_fans_in_sequence = sop.model_copy(update={"order": "groups", "groups": [
+        ["psu_1", "psu_2"], SequenceGroup(sequence=["fan_1", "fan_3", "fan_5", "fan_2", "fan_4", "fan_6"]), ["cover"]]})
+    assert psus_then_fans_in_sequence.must_precede("psu_2") == set()
+    assert psus_then_fans_in_sequence.must_precede("fan_1") == {"psu_1", "psu_2"}
+    assert psus_then_fans_in_sequence.must_precede("fan_2") == {"psu_1", "psu_2", "fan_1", "fan_3", "fan_5"}
+    assert psus_then_fans_in_sequence.must_precede("cover") == {"psu_1", "psu_2"} | FANS
+
+
+def test_sequence_groups_load_from_yaml(tmp_path):
+    def mutate(d):
+        d.update(order="groups", groups=[["psu_1", "psu_2", "cover"],
+                                         {"sequence": ["fan_6", "fan_5", "fan_4", "fan_3", "fan_2", "fan_1"]}])
+    sop = load_sop(write_mutated(tmp_path, mutate))
+    assert sop.must_precede("fan_1") == {"psu_1", "psu_2", "cover", "fan_6", "fan_5", "fan_4", "fan_3", "fan_2"}
+
+
+def test_tools_must_be_detector_classes_and_not_parts(tmp_path):
+    with pytest.raises(ConfigError, match="tool 'wrench' is not a detector class"):
+        load_sop(write_mutated(tmp_path, lambda d: d["layout"].update(tools=["wrench"])))
+    with pytest.raises(ConfigError, match="tool 'fan' is also a part"):
+        load_sop(write_mutated(tmp_path, lambda d: d["layout"].update(tools=["fan"])))
+
+
+def test_torqued_is_a_valid_evidence_value(tmp_path):
+    sop = load_sop(write_mutated(tmp_path, lambda d: d["steps"][0].update(evidence={"fan_bay_1": "torqued"})))
+    assert sop.steps[0].evidence == {"fan_bay_1": "torqued"}
+
+
+def test_filled_by_may_list_several_classes(lug_sop, tmp_path):
+    assert lug_sop.layout.slots["hole_1"].fills == ["lug_bolt_blue", "lug_bolt_green", "lug_bolt_red", "lug_bolt_gold"]
+    with pytest.raises(ConfigError, match="filled_by 'fan_pink' is not a detector class"):
+        load_sop(write_mutated(tmp_path, lambda d: d["layout"]["slots"]["fan_bay_1"].update(filled_by=["fan", "fan_pink"])))
+
+
+def test_anchor_follow_must_be_in_0_1(tmp_path):
+    for bad in (0, 1.5):
+        with pytest.raises(ConfigError, match="anchor_follow"):
+            load_sop(write_mutated(tmp_path, lambda d: d["layout"].update(anchor_follow=bad)))

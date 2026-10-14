@@ -20,6 +20,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from bench_decisions import labeller  # noqa: E402
 
+from sopvision.config import list_sops, load_sop  # noqa: E402
 from sopvision.settings import Settings  # noqa: E402
 from sopvision.storage.runlog import read_events  # noqa: E402
 
@@ -54,11 +55,13 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("logs", nargs="+", type=Path)
     ap.add_argument("--out", type=Path, required=True)
+    ap.add_argument("--sop", type=Path, default=None, help="SOP file (default: the first in sops/)")
     args = ap.parse_args()
     if (args.out / "requests.jsonl").exists():
         print(f"{args.out} is already frozen; refusing to overwrite", file=sys.stderr)
         return 1
-    apply = labeller(Settings())
+    settings = Settings()
+    apply = labeller(settings, load_sop(args.sop) if args.sop else list_sops(settings.sops_dir)[0])
     records = [r for path in args.logs for r in extract(path, apply)]
     args.out.mkdir(parents=True, exist_ok=True)
     out = args.out / "requests.jsonl"

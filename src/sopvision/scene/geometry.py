@@ -72,7 +72,7 @@ def match_slots(dets: list[Detection], sop: SopConfig, chassis_box: Box) -> dict
     for i, det in enumerate(dets):
         u, v = center_norm(det, chassis_box)
         for j, (_, spec) in enumerate(slots):
-            if det.cls in (spec.filled_by, spec.empty_as):
+            if det.cls in spec.fills or det.cls == spec.empty_as:
                 cost[i, j] = math.hypot(u - spec.at[0], v - spec.at[1])
     rows, cols = linear_sum_assignment(cost)
     return {slots[j][0]: dets[i] for i, j in zip(rows, cols) if cost[i, j] <= sop.slot_radius(slots[j][0])}

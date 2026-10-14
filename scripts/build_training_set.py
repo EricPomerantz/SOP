@@ -32,14 +32,13 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from bench_decisions import labeller  # noqa: E402
 from freeze_benchmark import extract  # noqa: E402
-from make_probes import BUILD, ELIGIBLE  # noqa: E402
 
-from sopvision.dataset import load_index  # noqa: E402
+from sopvision.config import SopConfig, list_sops, load_sop  # noqa: E402
 from sopvision.decide.questions import QuestionSet, wire_questions  # noqa: E402
-from sopvision.evaluation.decisions import run_number  # noqa: E402
+from sopvision.evaluation.deviations import ELIGIBLE, GENERATORS  # noqa: E402
+from sopvision.recordings import load_recordings  # noqa: E402
 from sopvision.settings import Settings  # noqa: E402
 
-TEST_RUNS = {12, 13}
 BOUNDARY = 1.0  # seconds around a step's end where "done" is left unlabelled
 NOISE_PER_ROW = 0.5  # noisy copies per labelled in_order row
 DEVIATION_SHARE = 0.35  # of the final set
@@ -85,16 +84,16 @@ def noisy(rec: dict, rng: random.Random) -> dict:
     return rec
 
 
-def deviation(rec: dict, kind: str, base_labels: dict) -> tuple[dict, dict]:
+def deviation(rec: dict, kind: str, base_labels: dict, sop: SopConfig) -> tuple[dict, dict]:
     rec = copy.deepcopy(rec)
-    truth = BUILD[kind](rec)
+    truth = GENERATORS[kind](rec, sop)
     out = {}
     if truth["current_step"]:
         out["current_step"] = "idle" if len(truth["current_step"]) > 1 else truth["current_step"][0]
     if truth["anomaly"] is not None:
         out["anomaly"] = truth["anomaly"]
-    if kind in ("out_of_order_work", "out_of_order_install"):
-        out["active_step_done"] = False  # the expected step's slot was emptied
+    if truth["active_step_done"] is not None:  # e.g. the expected step's slot was emptied
+        out["active_step_done"] = truth["active_step_done"]
     elif "active_step_done" in base_labels:
         out["active_step_done"] = base_labels["active_step_done"]
     return rec, out
@@ -110,28 +109,33 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("captures", type=Path)
     ap.add_argument("--out", type=Path, required=True)
-    ap.add_argument("--frozen", type=Path, nargs="*", default=[Path("benchmarks/sop-244"), Path("benchmarks/probes-d1")])
+    ap.add_argument("--frozen", type=Path, nargs="*", default=[Path("benchmarks/sop-244"), Path("benchmarks/probes-d1")],
+                    help="frozen sets whose states must not appear in training (missing folders are skipped)")
+    ap.add_argument("--sop", type=Path, default=None, help="SOP file (default: the first in sops/)")
     ap.add_argument("--seed", type=int, default=0)
     args = ap.parse_args()
     if (args.out / "train.jsonl").exists():
         print(f"{args.out} already exists; refusing to overwrite", file=sys.stderr)
         return 1
     settings, rng = Settings(), random.Random(args.seed)
-    index = {r.run: r for r in load_index(settings.sop_data_root)}
-    apply = labeller(settings)
+    sop = load_sop(args.sop) if args.sop else list_sops(settings.sops_dir)[0]
+    recordings = {r.source_id: r for r in load_recordings(sop, settings)}
+    apply = labeller(settings, sop)
     frozen_states = {state_key(json.loads(line)["request"]["state"])
-                     for d in args.frozen for line in (d / "requests.jsonl").read_text(encoding="utf-8").splitlines()}
+                     for d in args.frozen if (d / "requests.jsonl").exists()
+                     for line in (d / "requests.jsonl").read_text(encoding="utf-8").splitlines()}
 
     rows: dict[str, list[dict]] = {"train": [], "val": []}
     for path in sorted(args.captures.glob("*.jsonl")):
         records = extract(path, apply)
         if not records:
             continue
-        split, run = records[0]["source"].split(":")[0], run_number(records[0]["source"])
-        if run in TEST_RUNS or split not in rows:
-            print(f"refusing {path}: {records[0]['source']} is not a train/val recording", file=sys.stderr)
+        source = records[0]["source"]
+        recording = recordings.get(source)
+        if recording is None or recording.split not in rows:  # test recordings never reach training
+            print(f"refusing {path}: {source} is not a train/val recording of {sop.sop}", file=sys.stderr)
             return 1
-        segments = index[run].segments
+        split, segments = recording.split, recording.segments
         base = [(r, labels(r, segments)) for r in records]
         base = [(r, lab) for r, lab in base if lab]
         out = rows[split]
@@ -143,11 +147,11 @@ def main() -> int:
         n_dev = int((len(out) - start) * DEVIATION_SHARE / (1 - DEVIATION_SHARE))  # per recording: each split keeps the mix
         working = [(r, lab) for r, lab in stepped if lab["current_step"] != "idle"]
         for i in range(n_dev):
-            kind = list(BUILD)[i % len(BUILD)]
-            pool = [(r, lab) for r, lab in working if ELIGIBLE[kind](r)]
+            kind = list(GENERATORS)[i % len(GENERATORS)]
+            pool = [(r, lab) for r, lab in working if ELIGIBLE[kind](r, sop)]
             if pool:
                 r, lab = rng.choice(pool)
-                d, dlab = deviation(r, kind, lab)
+                d, dlab = deviation(r, kind, lab, sop)
                 out.append(row(d, dlab, f"deviation:{kind}", split, i))
         print(f"{path.name}: {len(records)} requests -> {len(out) - start} rows", flush=True)
 
@@ -157,7 +161,8 @@ def main() -> int:
     rows = {split: [r for r in items if state_key(r["state"]) not in frozen_states] for split, items in rows.items()}
 
     args.out.mkdir(parents=True, exist_ok=True)
-    manifest = {"seed": args.seed, "captures": str(args.captures), "excluded_runs": sorted(TEST_RUNS),
+    manifest = {"seed": args.seed, "sop": sop.sop, "captures": str(args.captures),
+                "excluded": "test-split recordings (never captured or used)",
                 "dropped_identical_to_frozen": dropped, "splits": {}}
     for split, items in rows.items():
         rng.shuffle(items)
