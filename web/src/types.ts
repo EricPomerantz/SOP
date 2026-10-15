@@ -14,7 +14,7 @@ export type WsMessage = SceneMsg | DecisionMsg | StepUpdateMsg | AlertMsg | RunS
 export type StepStatus = "pending" | "active" | "done";
 export type SopStep = { id: string; label: string; text: string };
 export type Sop = { id: string; name: string; version: number; description: string; steps: SopStep[]; torque?: boolean };
-export type SourceSpec = { id: string; kind: "file" | "webcam" | "rtsp"; label: string };
+export type SourceSpec = { id: string; kind: "file" | "rtsp"; label: string };
 export type LatencyResult = {
   frames: number; fps: number; decoded: number; delay_ms?: number; p10_ms?: number; p90_ms?: number;
   min_ms?: number; max_ms?: number; source_id?: string; saved?: boolean; measured_at?: string;

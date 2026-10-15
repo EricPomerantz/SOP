@@ -1,26 +1,24 @@
 import pytest
+from pydantic import ValidationError
 
 from sopvision.settings import Settings
 from sopvision.sources.file import FileSource
-from sopvision.sources.registry import SourceSpec, SourceUnavailableError, list_sources, open_source
-
-WEBCAM_IN_CONTAINER = "Webcam isn't available in the container — run natively or use an RTSP source."
+from sopvision.sources.registry import SourceSpec, list_sources, open_source
 
 
-def test_webcam_not_listed_or_openable_in_container(settings_in_container):
-    assert all(s.kind != "webcam" for s in list_sources(settings_in_container))
-    with pytest.raises(SourceUnavailableError, match=WEBCAM_IN_CONTAINER):
-        open_source(SourceSpec(id="webcam:0", kind="webcam", label="Webcam", device=0), settings_in_container)
+def test_only_file_and_rtsp_sources_are_supported():
+    assert all(source.kind in {"file", "rtsp"} for source in list_sources(Settings()))
+    with pytest.raises(ValidationError, match="kind"):
+        SourceSpec.model_validate({"id": "webcam:0", "kind": "webcam", "label": "Webcam"})
 
 
 def test_lists_scenarios_and_rtsp(tmp_path):
     scenarios = tmp_path / "scenarios"
     scenarios.mkdir()
     (scenarios / "fan_removed.mp4").touch()
-    s = Settings(scenarios_dir=scenarios, sop_data_root=tmp_path / "none", sopvision_rtsp_urls=["rtsp://cam/1"],
-                 sopvision_in_container=False)
+    s = Settings(scenarios_dir=scenarios, sop_data_root=tmp_path / "none", sopvision_rtsp_urls=["rtsp://cam/1"])
     by_id = {spec.id: spec for spec in list_sources(s)}
-    assert {"scenario:fan_removed", "rtsp:0", "webcam:0"} <= set(by_id)
+    assert {"scenario:fan_removed", "rtsp:0"} <= set(by_id)
     assert by_id["scenario:fan_removed"].label == "Simulated: fan removed"
     assert by_id["rtsp:0"].url == "rtsp://cam/1"
 

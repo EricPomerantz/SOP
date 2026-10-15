@@ -1,6 +1,6 @@
 # SOP Vision — 5-minute demo
 
-**Before you start:** `uv run sopvision serve`, open http://localhost:8000, make sure no run is in progress.
+**Before you start:** `./start.sh --model jev --no-labelstudio`, open http://localhost:8000, make sure no run is in progress.
 
 ## 1. A clean run (2 min)
 
@@ -33,5 +33,5 @@ Press **Download run report** — a CSV with every step's completion time, durat
 - **Who does what:** Jev reads the scene description, names the step under way, and watches for off-SOP activity and anomalies. A step is ticked off once its part is visibly in place, so the checklist keeps working even if Jev is unreachable.
 - **Don't overclaim:** on this footage every step was ticked off by visual evidence, not by Jev. The off-SOP stretches are an empty bench, so you'll see no off-SOP warning. Present Jev as "knows which step is happening", not "confirms each step" or "flags off-SOP work". Those still need footage that shows them.
 - **New equipment = new config.** An SOP is a YAML file; the detector is retrained from three reference frames boxed once (~10 minutes of someone's time).
-- **Wrong order and skipped steps** are caught too (see `uv run pytest -m jev`); this footage only contains correct runs, so they're shown with scripted scenes.
+- **Wrong order and skipped steps** are caught too (see `docker compose run --rm gpu-tests -m jev`); this footage only contains correct runs, so they're shown with scripted scenes.
 - **Production path:** the same Docker image runs on an on-prem Linux GPU server; RTSP cameras plug in through `.env`.

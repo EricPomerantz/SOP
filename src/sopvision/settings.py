@@ -20,16 +20,15 @@ class Settings(BaseSettings):
     # compare_shadow model gets the same requests and both answers are logged).
     decision_mode: Literal["jev", "decider", "laya", "compare"] = "jev"
     compare_shadow: Literal["decider", "laya"] = "decider"
-    decider_url: str = "http://localhost:8001"
+    decider_url: str = "http://decider:8001"
     decider_timeout: float = 5.0
     # Laya (convaiinnovations/laya), a 421M decision model behind the same wire format; evaluation only so far.
-    laya_url: str = "http://localhost:8002"
+    laya_url: str = "http://laya:8000"
     laya_model: str = "english"  # english | multilingual | typed-decisions
     laya_max_len: int | None = None  # token budgets; None = the checkpoint's own (english 512 / 192)
     laya_head_max_len: int | None = None
-    sop_data_root: Path = Path("sop-sample-training-data/server_fan")  # the server_fan (clips) dataset
-    datasets_dir: Path = Path("datasets")  # timeline-format datasets (new SOPs, recordings) live in <datasets_dir>/<dir>
-    sopvision_in_container: bool = False
+    sop_data_root: Path = Path("/data/server_fan")  # the server_fan (clips) dataset
+    datasets_dir: Path = Path("/datasets")  # timeline-format datasets (new SOPs, recordings) live in <datasets_dir>/<dir>
     sopvision_rtsp_urls: Annotated[list[str], NoDecode] = []
     rtsp_low_latency: bool = True  # open RTSP streams with FFmpeg's low-buffering options
     # How far a live camera's frames trail reality, for timing torque results. A camera measured with the latency
@@ -49,11 +48,10 @@ class Settings(BaseSettings):
     def check_data_root(self) -> None:
         """Fail with the variable to fix when the dataset folder is missing or isn't a recordings dataset."""
         # In the container SOP_DATA_ROOT is fixed by docker-compose; the user-facing knob is SOP_DATASET_DIR.
-        fix = ("Set SOP_DATASET_DIR in .env (docker-compose mounts it at /data)." if self.sopvision_in_container
-               else None)
+        fix = "Set SOP_DATASET_DIR in .env (docker-compose mounts it at /data)."
         root = self.sop_data_root
         if not root.is_dir():
-            raise ConfigError(f"SOP_DATA_ROOT points to {root}, which doesn't exist. {fix or 'Set it in .env.'}")
+            raise ConfigError(f"SOP_DATA_ROOT points to {root}, which doesn't exist. {fix}")
         if not ((root / "raw").is_dir() and (root / "test").is_dir()):
             raise ConfigError(f"SOP_DATA_ROOT points to {root}, which isn't a recordings dataset (needs raw/ and test/ "
-                              f"folders). {fix or 'Set SOP_DATA_ROOT in .env.'}")
+                              f"folders). {fix}")

@@ -13,7 +13,7 @@ from sopvision.doctor import GpuReport, require_gpu
 from sopvision.pipeline import RunContext
 from sopvision.server.frames import FrameBuffer
 from sopvision.settings import Settings
-from sopvision.sources.registry import SourceSpec, check_available, list_sources
+from sopvision.sources.registry import SourceSpec, SourceUnavailableError, list_sources
 from sopvision.storage.report import RunReport, build_report
 from sopvision.storage.runlog import RunLog, read_events
 
@@ -45,7 +45,7 @@ class RunInfo(BaseModel):
 
 def startup_checks(settings: Settings, gpu: GpuReport) -> list[SopConfig]:
     """Everything `serve`/`eval` need, checked up front with messages that say what to fix."""
-    require_gpu(settings.sopvision_in_container, gpu)
+    require_gpu(gpu)
     settings.check_data_root()
     sops = list_sops(settings.sops_dir)
     for sop in sops:
@@ -122,12 +122,10 @@ class RunManager:
             raise RunConflictError("A recording is in progress. Stop it first.")
         sop = self.sops.get(sop_id)
         spec = next((s for s in list_sources(self.settings) if s.id == source_id), None)
-        if spec is None and source_id.startswith("webcam:") and source_id[7:].isdigit():
-            # Not listed in the container, but still a webcam: let check_available explain why it can't be used.
-            spec = SourceSpec(id=source_id, kind="webcam", label="USB webcam", device=int(source_id[7:]))
+        if spec is None and source_id.startswith("webcam:"):
+            raise SourceUnavailableError("USB webcams are no longer supported. Use an RTSP source or a video file.")
         if sop is None or spec is None:
             raise NotFoundError(f"Unknown {'SOP ' + sop_id if sop is None else 'source ' + source_id}")
-        check_available(spec, self.settings)
         run_id = time.strftime("run-%Y%m%d-%H%M%S-") + secrets.token_hex(2)  # unique even within one second
         runlog = RunLog(self.settings.runs_dir / f"{run_id}.jsonl")
         ctx = RunContext(run_id, sop, spec, runlog, self.broadcast, self.frames)
@@ -192,7 +190,6 @@ class RunManager:
             raise NotFoundError(f"Unknown source {source_id}")
         if spec.kind == "file":
             raise ConfigError("Record from a live camera, not a video file.")
-        check_available(spec, self.settings)
         run_id = name or time.strftime("r%Y%m%d-%H%M%S")
         session = RecordingSession(self.settings, load_sop(Path(sop_file)), sop_file, spec, split, run_id, self.frames, fps)
         session.start()

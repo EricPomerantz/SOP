@@ -162,19 +162,21 @@ fine-tune Laya (12+ epochs); score on the test runs and the deviation test runs;
 
 ## Detector labels
 
-All in Docker; train and val runs only (test runs are never sampled).
+All in Docker; train and val runs only (test runs are never sampled). Build the shared tooling image with
+`docker compose build tools`. Run CPU modules with `docker compose run --rm tools -m training.<module>`;
+GPU modules use `docker compose run --rm --entrypoint python trainer -m training.<module>`.
 
 1. Sample frames: `training/sample_recordings.py` -> `data/lug_bolts/frames` (every 4 s, plus one just before each
    torque press, when the wrench is on a bolt).
-2. Hands and wrench, zero-shot: `training/zero_shot_boxes.py` (Grounding DINO) -> `data/lug_bolts/zero_shot.jsonl`. It
-   currently runs in the Decider's image for its torch/transformers; move it to its own image before Decider goes.
+2. Hands and wrench, zero-shot: `training/zero_shot_boxes.py` (Grounding DINO) -> `data/lug_bolts/zero_shot.jsonl`,
+   using the `trainer` image's torch/transformers dependencies and GPU. This no longer depends on Decider's image.
 3. Pre-label: `training/prelabel_bolts.py` -> `data/lug_bolts/labels_auto`. The holes sit at fixed pixel positions (the
    wheel isn't turned between runs), followed through camera shake. A bolt is the colour filling the hole; no colour
    means an empty hole, or the wrench socket if that hole already had a bolt in the run.
 4. Review in Label Studio: `docker compose --profile labelling up -d labelstudio`, http://localhost:8080. Labelling
    setup: `data/lug_bolts/labelstudio/config.xml`; import `data/lug_bolts/labelstudio/tasks.json` (flagged frames
    first). Fix every box, then export JSON.
-5. `python -m training.labelstudio --sop sops/lug_bolts.yaml import --export <export.json>
+5. `docker compose run --rm tools -m training.labelstudio --sop sops/lug_bolts.yaml import --export <export.json>
    --manifest data/lug_bolts/frames/manifest.jsonl --labels data/lug_bolts/labels_auto --out data/lug_bolts/yolo`,
    then train the detector:
    `docker compose --profile training run --rm trainer train --data data/lug_bolts/yolo/dataset.yaml --out models/lug_bolts`
@@ -190,13 +192,13 @@ handle. `hand` is every visible hand, including gloved hands. Box a bolt in a ha
 Each run needs `steps.csv` (`step_id,start_s,end_s`): which step was under way when. It's the ground truth for scoring
 and training the decision model. For now these are drafted by machine and corrected by hand:
 
-1. `scripts/draft_steps.py draft --sop sops/lug_bolts.yaml` replays every recording through the detector and tracker
+1. `docker compose run --rm --entrypoint python trainer scripts/draft_steps.py draft --sop sops/lug_bolts.yaml` replays every recording through the detector and tracker
    (no decision model) and writes `data/lug_bolts/steps/<run>.csv` plus `REVIEW.md` (each run's alerts and the steps
    the tracker never completed). A step runs from the previous completion to its own; 5 s or more with nobody at the
    wheel is `idle`.
 2. Correct each draft against its video: add what the tracker can't see (a removed bolt, `off_sop` stretches such as
    wiggling the wheel or reaching across the hub, steps it never completed) and fix boundaries.
-3. `scripts/draft_steps.py install --sop sops/lug_bolts.yaml` checks every file and copies it to
+3. `docker compose run --rm tools scripts/draft_steps.py install --sop sops/lug_bolts.yaml` checks every file and copies it to
    `datasets/lug_bolts/runs/<run>/steps.csv`.
 
 Planned: a dashboard page where the person who recorded the run marks step changes while watching it, so building

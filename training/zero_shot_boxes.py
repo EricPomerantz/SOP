@@ -1,9 +1,9 @@
 """Zero-shot boxes (Grounding DINO) for the classes colour can't find: hands and the torque wrench.
 
-Standalone (transformers + Pillow only) so it runs in the GPU image that already has them, the Decider's:
+Uses the training dependencies and GPU in the trainer service:
 
-    docker compose --profile decider run --rm --no-deps -v ./training:/w/training:ro -v ./data/lug_bolts:/w/data \
-        --entrypoint python decider /w/training/zero_shot_boxes.py /w/data/frames /w/data/zero_shot.jsonl \
+    docker compose run --rm --entrypoint python trainer -m training.zero_shot_boxes \
+        data/lug_bolts/frames data/lug_bolts/zero_shot.jsonl \
         --prompt hand="a hand." --prompt torque_wrench="the head of a torque wrench."
 
 Writes one line per manifest image: {"image", "boxes": [{"cls", "xyxy", "conf"}]} (pixels). Each class is prompted on

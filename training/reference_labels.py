@@ -1,14 +1,16 @@
-"""Reference-frame labelling: the user draws boxes on 3 frames of one run once; everything else is derived.
+"""Reference-frame annotation in Label Studio, saved as full-resolution pixel boxes.
 
-Step 1 (this file, `draw`): an OpenCV window asks for each group of boxes in turn and saves
-data/reference/Install_<run>.json with the boxes in full-resolution pixels.
-
-Usage: uv run python -m training.reference_labels draw --run 4
+docker compose run --rm tools -m training.reference_labels config
+docker compose run --rm tools -m training.reference_labels export-tasks --run 4
+docker compose run --rm tools -m training.reference_labels import-annotations --export data/reference/annotations.json
 """
 
 import argparse
 import json
+from math import isfinite
 from pathlib import Path
+from tempfile import NamedTemporaryFile
+from xml.etree import ElementTree
 
 import cv2
 import numpy as np
@@ -16,6 +18,8 @@ from scipy.optimize import linear_sum_assignment
 
 from sopvision.dataset import load_index
 from sopvision.settings import Settings
+from training.labelstudio import LOCAL_FILES_PREFIX, _chosen_result, label_config, ls_to_yolo, yolo_to_ls
+from training.yolo_format import LabeledBox, from_yolo, to_yolo
 
 # frame name -> [(class, how many boxes, instruction)]
 REFERENCE_GROUPS: dict[str, list[tuple[str, int, str]]] = {
@@ -34,12 +38,7 @@ REFERENCE_GROUPS: dict[str, list[tuple[str, int, str]]] = {
 }
 # Times in the reference run (Install_4) where nothing blocks the parts.
 REFERENCE_TIMES = {4: {"start": 0.3, "filled": 74.8, "covered": 86.0}}
-WINDOW_WIDTH = 1600
-
-
-def display_to_image(rois, scale: float) -> list[tuple[float, float, float, float]]:
-    """selectROIs (x, y, w, h) boxes in the scaled window → (x1, y1, x2, y2) in image pixels."""
-    return [(x / scale, y / scale, (x + w) / scale, (y + h) / scale) for x, y, w, h in rois]
+REFERENCE_CLASSES = [cls for groups in REFERENCE_GROUPS.values() for cls, _, _ in groups]
 
 
 def transform_box(xyxy, h: np.ndarray) -> tuple[float, float, float, float]:
@@ -133,83 +132,118 @@ def read_frame(video: Path, t: float):
         cap.release()
 
 
-NEXT_KEYS = {ord("n"), ord("N"), 13, 10, 32}  # N, Enter, Space
-UNDO_KEYS = {ord("u"), ord("U"), 8}  # U, Backspace
-
-
-def _ask(frame, scale: float, cls: str, n: int, text: str) -> list[tuple[float, float, float, float]]:
-    """Drag to draw; each box is kept when the mouse is released. U undoes, N goes to the next round."""
-    base = cv2.resize(frame, None, fx=scale, fy=scale)
-    title = "Reference labels"
-    boxes: list[tuple[int, int, int, int]] = []  # (x, y, w, h) in window pixels
-    drag: dict = {"start": None, "cur": None}
-
-    def on_mouse(event, x, y, flags, param):
-        if event == cv2.EVENT_LBUTTONDOWN:
-            drag["start"] = drag["cur"] = (x, y)
-        elif event == cv2.EVENT_MOUSEMOVE and drag["start"]:
-            drag["cur"] = (x, y)
-        elif event == cv2.EVENT_LBUTTONUP and drag["start"]:
-            (x0, y0), drag["start"] = drag["start"], None
-            if abs(x - x0) > 4 and abs(y - y0) > 4:
-                boxes.append((min(x, x0), min(y, y0), abs(x - x0), abs(y - y0)))
-
-    cv2.namedWindow(title, cv2.WINDOW_AUTOSIZE)
-    cv2.setMouseCallback(title, on_mouse)
-    while True:
-        shown = base.copy()
-        for i, (x, y, w, h) in enumerate(boxes, 1):
-            cv2.rectangle(shown, (x, y), (x + w, y + h), (0, 220, 0), 2)
-            cv2.putText(shown, str(i), (x + 4, y + 22), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 220, 0), 2)
-        if drag["start"]:
-            cv2.rectangle(shown, drag["start"], drag["cur"], (0, 255, 255), 2)
-        done = len(boxes) >= n
-        status = f"All {n} drawn - press N for next (U = undo)" if done else f"{len(boxes)}/{n} drawn - U = undo, N = next"
-        cv2.rectangle(shown, (0, 0), (shown.shape[1], 64), (0, 0, 0), -1)
-        cv2.putText(shown, text, (10, 26), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (0, 255, 255), 2)
-        cv2.putText(shown, status, (10, 54), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 220, 0) if done else (255, 255, 255), 2)
-        cv2.imshow(title, shown)
-        key = cv2.waitKey(20) & 0xFF
-        if key in UNDO_KEYS and boxes:
-            boxes.pop()
-        elif key in NEXT_KEYS or cv2.getWindowProperty(title, cv2.WND_PROP_VISIBLE) < 1:
-            break
-    cv2.destroyAllWindows()
-    return display_to_image(boxes, scale)
-
-
 def replace_classes(existing: dict, new_boxes: dict[str, list[dict]], classes: set[str]) -> dict:
-    """Swap in freshly drawn boxes for `classes`, keeping every other saved box."""
+    """Swap in reviewed boxes for `classes`, keeping every other saved box."""
     for name, boxes in new_boxes.items():
         frame = existing["frames"][name]
         frame["boxes"] = [b for b in frame["boxes"] if b["cls"] not in classes] + boxes
     return existing
 
 
-def draw(run_no: int, out_dir: Path, only: set[str] | None = None) -> Path:
+def export_reference_tasks(run_no: int, out: Path, doc_root: Path, reference: Path | None = None,
+                           only: set[str] | None = None) -> int:
+    if run_no not in REFERENCE_TIMES:
+        raise ValueError(f"No reference times configured for Install_{run_no}")
+    if only is not None and (not only or not only <= set(REFERENCE_CLASSES)):
+        raise ValueError(f"Unknown reference classes: {only}")
     run = {r.run: r for r in load_index(Settings().sop_data_root)}[run_no]
-    path = out_dir / f"Install_{run_no}.json"
-    drawn: dict[str, list[dict]] = {}
+    reference = reference or Path(f"data/reference/Install_{run_no}.json")
+    existing = json.loads(reference.read_text(encoding="utf-8")) if reference.exists() else {"run": run_no, "frames": {}}
+    if existing["run"] != run_no:
+        raise ValueError("Reference run does not match the requested run")
+    tasks = []
     for name, groups in REFERENCE_GROUPS.items():
-        groups = [g for g in groups if only is None or g[0] in only]
+        groups = [group for group in groups if only is None or group[0] in only]
         if not groups:
             continue
-        frame = read_frame(run.raw_path, REFERENCE_TIMES[run_no][name])
-        scale = WINDOW_WIDTH / frame.shape[1]
-        drawn[name] = []
-        for cls, n, text in groups:
-            got = _ask(frame, scale, cls, n, text)
-            if len(got) != n:
-                print(f"note: {cls}: expected {n} boxes, got {len(got)}")
-            drawn[name] += [{"cls": cls, "xyxy": [round(v, 1) for v in b]} for b in got]
-    if only:
-        result = replace_classes(json.loads(path.read_text(encoding="utf-8")), drawn, only)
-    else:
-        result = {"run": run_no, "frames": {name: {"t": REFERENCE_TIMES[run_no][name], "boxes": boxes}
-                                            for name, boxes in drawn.items()}}
+        saved = existing["frames"].get(name, {})
+        timestamp = saved.get("t", REFERENCE_TIMES[run_no][name])
+        image = read_frame(run.raw_path, timestamp)
+        height, width = image.shape[:2]
+        image_path = out.parent / f"Install_{run_no}_{name}.png"
+        relative = image_path.resolve().relative_to(doc_root.resolve()).as_posix()
+        image_path.parent.mkdir(parents=True, exist_ok=True)
+        if not cv2.imwrite(str(image_path), image):
+            raise RuntimeError(f"Cannot write {image_path}")
+        classes = [class_name for class_name, _, _ in groups]
+        predictions = [yolo_to_ls(to_yolo(LabeledBox(box["cls"], tuple(box["xyxy"]), 1.0), width, height, classes), classes)
+                       for box in saved.get("boxes", []) if box["cls"] in classes]
+        tasks.append({"data": {"image": LOCAL_FILES_PREFIX + relative, "run": run_no, "frame": name, "t": timestamp,
+                               "width": width, "height": height, "classes": classes,
+                               "instructions": "; ".join(text for _, _, text in groups)},
+                      "predictions": [{"model_version": "reference", "result": predictions}]})
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(tasks, indent=1), encoding="utf-8")
+    return len(tasks)
+
+
+def import_reference_annotations(export: Path, out_dir: Path) -> list[Path]:
+    pending: dict[int, dict] = {}
+    seen = set()
+    for task in json.loads(export.read_text(encoding="utf-8")):
+        results, reviewed = _chosen_result(task)
+        if not reviewed:
+            continue
+        data = task["data"]
+        run_no, name = data["run"], data["frame"]
+        if run_no not in REFERENCE_TIMES or name not in REFERENCE_GROUPS:
+            raise ValueError("Unknown reference run or frame")
+        if (run_no, name) in seen:
+            raise ValueError(f"Duplicate reference frame: Install_{run_no}/{name}")
+        seen.add((run_no, name))
+        classes, width, height = data["classes"], data["width"], data["height"]
+        allowed = {class_name for class_name, _, _ in REFERENCE_GROUPS[name]}
+        if not classes or not set(classes) <= allowed:
+            raise ValueError(f"Invalid reference classes for {name}")
+        if not isinstance(width, int) or not isinstance(height, int) or width <= 0 or height <= 0:
+            raise ValueError("Invalid reference image dimensions")
+        if run_no not in pending:
+            path = out_dir / f"Install_{run_no}.json"
+            pending[run_no] = (json.loads(path.read_text(encoding="utf-8")) if path.exists() else
+                               {"run": run_no, "frames": {frame: {"t": timestamp, "boxes": []}
+                                                         for frame, timestamp in REFERENCE_TIMES[run_no].items()}})
+        existing = pending[run_no]
+        if existing["run"] != run_no or existing["frames"][name]["t"] != data["t"]:
+            raise ValueError("Reference run or timestamp does not match the saved reference")
+        boxes = []
+        for result in results:
+            if result.get("type") != "rectanglelabels":
+                continue
+            if result.get("original_width", width) != width or result.get("original_height", height) != height:
+                raise ValueError("Annotation dimensions do not match the reference image")
+            value = result["value"]
+            if len(value["rectanglelabels"]) != 1 or value["rectanglelabels"][0] not in classes:
+                raise ValueError("Annotation contains an unexpected reference class")
+            left, top, box_width, box_height = (float(value[key]) for key in ("x", "y", "width", "height"))
+            if (not all(isfinite(coordinate) for coordinate in (left, top, box_width, box_height))
+                    or min(left, top) < -0.0001 or min(box_width, box_height) <= 0
+                    or left + box_width > 100.0001 or top + box_height > 100.0001
+                    or value.get("rotation", 0) != 0 or result.get("image_rotation", 0) != 0):
+                raise ValueError("Reference rectangles must be unrotated and within the image")
+            box = from_yolo(ls_to_yolo(result, classes), width, height, classes)
+            boxes.append({"cls": box.cls, "xyxy": [round(coordinate, 1) for coordinate in box.xyxy]})
+        replace_classes(existing, {name: boxes}, set(classes))
+        for class_name, expected, _ in REFERENCE_GROUPS[name]:
+            actual = sum(box["cls"] == class_name for box in boxes)
+            if class_name in classes and actual != expected:
+                print(f"note: {class_name}: expected {expected} boxes, got {actual}")
+    paths = []
+    if not pending:
+        return paths
     out_dir.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(result, indent=1), encoding="utf-8")
-    return path
+    for run_no, reference in pending.items():
+        path = out_dir / f"Install_{run_no}.json"
+        with NamedTemporaryFile(mode="w", encoding="utf-8", dir=out_dir, suffix=".tmp", delete=False) as temporary:
+            temporary_path = Path(temporary.name)
+            try:
+                json.dump(reference, temporary, indent=1)
+                temporary.close()
+                temporary_path.chmod(path.stat().st_mode & 0o777 if path.exists() else 0o644)
+                temporary_path.replace(path)
+            finally:
+                temporary_path.unlink(missing_ok=True)
+        paths.append(path)
+    return paths
 
 
 FAN_ACTIONS = (1, 2, 3, 4, 5, 6)
@@ -428,10 +462,16 @@ def write_slots(ref_json: Path, sop_path: Path, check_run: int, check_out: Path)
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="cmd", required=True)
-    d = sub.add_parser("draw")
-    d.add_argument("--run", type=int, default=4)
-    d.add_argument("--out", type=Path, default=Path("data/reference"))
-    d.add_argument("--only", help="comma-separated classes to redraw, keeping the rest")
+    sub.add_parser("config", help="Label Studio labelling interface XML")
+    export = sub.add_parser("export-tasks")
+    export.add_argument("--run", type=int, default=4)
+    export.add_argument("--out", type=Path, default=Path("data/reference/labelstudio/tasks.json"))
+    export.add_argument("--doc-root", type=Path, default=Path("data"))
+    export.add_argument("--reference", type=Path)
+    export.add_argument("--only", help="comma-separated classes to review, keeping the rest")
+    importer = sub.add_parser("import-annotations")
+    importer.add_argument("--export", type=Path, required=True)
+    importer.add_argument("--out", type=Path, default=Path("data/reference"))
     sl = sub.add_parser("slots", help="write slot centres from the reference into the SOP YAML, then draw a check")
     sl.add_argument("--reference", type=Path, default=Path("data/reference/Install_4.json"))
     sl.add_argument("--sop", type=Path, default=Path("sops/server_fan.yaml"))
@@ -443,8 +483,17 @@ def main() -> None:
     g.add_argument("--out", type=Path, default=Path("data/labels_auto"))
     g.add_argument("--sop", type=Path, default=Path("sops/server_fan.yaml"))
     args = parser.parse_args()
-    if args.cmd == "draw":
-        print("saved", draw(args.run, args.out, set(args.only.split(",")) if args.only else None))
+    if args.cmd == "config":
+        config = ElementTree.fromstring(label_config(REFERENCE_CLASSES))
+        config.insert(0, ElementTree.Element("Header", {"value": "$instructions"}))
+        print(ElementTree.tostring(config, encoding="unicode"))
+    elif args.cmd == "export-tasks":
+        only = {class_name.strip() for class_name in args.only.split(",")} if args.only else None
+        count = export_reference_tasks(args.run, args.out, args.doc_root, args.reference, only)
+        print(f"wrote {count} tasks to {args.out}")
+    elif args.cmd == "import-annotations":
+        for path in import_reference_annotations(args.export, args.out):
+            print("saved", path)
     elif args.cmd == "slots":
         write_slots(args.reference, args.sop, args.check_run, args.check_out)
     else:

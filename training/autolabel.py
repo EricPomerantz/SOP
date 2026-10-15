@@ -3,8 +3,8 @@
 Each class is prompted separately with its text from the SOP config, so a box's class is exact.
 
 Usage:
-  uv run --group training python -m training.autolabel compare --n 20 --out data/autolabel_compare
-  uv run --group training python -m training.autolabel run --labeler gdino --out data/labels_auto
+    docker compose run --rm --entrypoint python trainer -m training.autolabel compare --n 20 --out data/autolabel_compare
+    docker compose run --rm --entrypoint python trainer -m training.autolabel run --labeler gdino --out data/labels_auto
 """
 
 import argparse

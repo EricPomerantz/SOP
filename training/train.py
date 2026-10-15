@@ -1,8 +1,8 @@
 """Train the SOP detector and benchmark it (spec §6.1 step 5).
 
 Usage:
-  uv run python -m training.train train --data data/yolo/dataset.yaml
-  uv run python -m training.train bench --weights models/server_fan/best.pt --video <raw video>
+    docker compose run --rm trainer train --data data/yolo/dataset.yaml
+    docker compose run --rm trainer bench --weights models/server_fan/best.pt --video <raw video>
 """
 
 import argparse

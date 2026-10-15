@@ -8,7 +8,6 @@ services:
     environment:
       SOP_DATA_ROOT: /data/server_fan
       DATASETS_DIR: /datasets
-      SOPVISION_IN_CONTAINER: "1"
       DECISION_MODE: ${DECISION_MODE:-jev}  # from the shell or .env: jev | decider | laya | compare
       COMPARE_SHADOW: ${COMPARE_SHADOW:-decider}  # compare mode's shadow model: decider | laya
       DECIDER_URL: http://decider:8001
@@ -33,7 +32,7 @@ services:
               capabilities: [gpu]
 
   # Unit tests in Docker: `docker compose --profile test run --rm tests` (add pytest args after `tests`).
-  tests:
+  tests: &tests
     profiles: [test]
     build:
       context: .
@@ -41,6 +40,10 @@ services:
     image: sopvision:test
     environment:
       DECIDER_URL: http://decider:8001  # for `-m decider` (the Decider service must be up)
+      LAYA_URL: http://laya:8000
+      SOP_DATA_ROOT: /data/server_fan
+      DATASETS_DIR: /datasets
+      PYTHONDONTWRITEBYTECODE: "1"
     volumes:
       - ./src:/app/src:ro
       - ./tests:/app/tests:ro
@@ -48,6 +51,47 @@ services:
       - ./scripts:/app/scripts:ro
       - ./sops:/app/sops:ro
       - ./pyproject.toml:/app/pyproject.toml:ro
+      - ${SOP_DATASET_DIR:-./sop-sample-training-data}:/data:ro
+      - ./datasets:/datasets:ro
+      - ./models:/app/models:ro
+      - ./data:/app/data:ro
+      - ./benchmarks:/app/benchmarks:ro
+
+  gpu-tests:
+    <<: *tests
+    profiles: [test-gpu]
+    env_file:
+      - path: .env
+        required: false
+    command: ["-m", "gpu or jev or decider or dataset"]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  web-tests:
+    profiles: [test]
+    build:
+      context: .
+      target: web-tests
+    image: sopvision:web-tests
+
+  web-dev:
+    profiles: [dev]
+    build:
+      context: .
+      target: web-dev
+    image: sopvision:web-dev
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./web/src:/web/src:ro
+      - ./web/index.html:/web/index.html:ro
+      - ./web/vite.config.ts:/web/vite.config.ts:ro
+      - ./web/tsconfig.json:/web/tsconfig.json:ro
 
   # Local Decider (Mapika/decider-4b): `docker compose --profile decider up -d decider`.
   # Not a dependency of sopvision on purpose: DECISION_MODE=jev must keep working when it is down.
@@ -132,18 +176,44 @@ services:
               count: all
               capabilities: [gpu]
 
-  # Detector training (Ultralytics, on the GPU) in the app's image:
-  #   docker compose --profile training run --rm trainer train --data data/lug_bolts/yolo/dataset.yaml --out models/lug_bolts
-  trainer:
-    profiles: [training]
-    image: sopvision:latest
-    entrypoint: ["python", "-m", "training.train"]
-    shm_size: 4gb  # the data loader's worker processes share batches through /dev/shm (Docker's default is 64 MB)
+  tools: &tools
+    profiles: [tools]
+    build:
+      context: .
+      target: tools
+    image: sopvision:tools
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      SOP_DATA_ROOT: /data/server_fan
+      DATASETS_DIR: /app/datasets
+      DECIDER_URL: http://decider:8001
+      LAYA_URL: http://laya:8000
+      HF_HOME: /cache
+    entrypoint: ["python"]
+    command: ["--help"]
     volumes:
+      - ${SOP_DATASET_DIR:-./sop-sample-training-data}:/data:ro
+      - ./src:/app/src:ro
+      - ./scripts:/app/scripts:ro
       - ./training:/app/training:ro
-      - ./data:/app/data  # datasets in, Ultralytics run folders out (data/ultralytics)
-      - ./models:/app/models  # best.pt and metrics.json land here
-      - ./yolo26m.pt:/app/yolo26m.pt:ro  # pretrained starting point
+      - ./data:/app/data
+      - ./datasets:/app/datasets
+      - ./models:/app/models
+      - ./weights:/app/weights
+      - ./sops:/app/sops
+      - ./runs:/app/runs
+      - ./benchmarks:/app/benchmarks
+      - ./yolo26m.pt:/app/yolo26m.pt:ro
+      - hf_cache:/cache
+
+  trainer:
+    <<: *tools
+    profiles: [training]
+    entrypoint: ["python", "-m", "training.train"]
+    command: ["--help"]
+    shm_size: 4gb
     deploy:
       resources:
         reservations:

@@ -48,7 +48,7 @@ def calibrate(
 ) -> None:
     """Draw the SOP's slot centres on a recording, using the trained detector to find the chassis.
 
-    Slot centres themselves come from reference boxes: python -m training.reference_labels slots
+    Slot centres come from: docker compose run --rm tools -m training.reference_labels slots
     """
     import cv2
 
@@ -79,10 +79,10 @@ def calibrate(
 
 
 @app.command("eval")
-def eval_cmd(out: Path = typer.Option(Path("runs/eval-native.json"), help="Where to write the eval report")) -> None:
+def eval_cmd(out: Path = typer.Option(Path("runs/eval.json"), help="Where to write the eval report")) -> None:
     """Replay test and scenario videos and check the acceptance criteria."""
     from sopvision.config import ConfigError
-    from sopvision.doctor import GpuUnavailableError, gpu_report, in_container
+    from sopvision.doctor import GpuUnavailableError, gpu_report
     from sopvision.evaluation.run_eval import run_eval, summary_lines
     from sopvision.server.runs import startup_checks
     from sopvision.settings import Settings
@@ -93,7 +93,7 @@ def eval_cmd(out: Path = typer.Option(Path("runs/eval-native.json"), help="Where
     except (ConfigError, GpuUnavailableError) as e:
         typer.echo(str(e), err=True)
         raise typer.Exit(1)
-    env = {"in_container": in_container(), "gpu": gpu.device_name, "torch": gpu.torch_version, "sop": sops[0].sop}
+    env = {"in_container": True, "gpu": gpu.device_name, "torch": gpu.torch_version, "sop": sops[0].sop}
     report = run_eval(settings, sops[0], out, env, progress=typer.echo)
     for line in summary_lines(report):
         typer.echo(line)
@@ -103,9 +103,9 @@ def eval_cmd(out: Path = typer.Option(Path("runs/eval-native.json"), help="Where
 
 
 @app.command()
-def compare(first: Path = typer.Argument(..., help="Eval report, e.g. runs/eval-native.json"),
-            second: Path = typer.Argument(..., help="Eval report, e.g. runs/eval-docker.json")) -> None:
-    """Compare a native and a Docker eval report."""
+def compare(first: Path = typer.Argument(..., help="Baseline eval report"),
+        second: Path = typer.Argument(..., help="New eval report")) -> None:
+    """Compare two evaluation reports for regressions."""
     from sopvision.evaluation.compare import compare_reports
     from sopvision.evaluation.metrics import EvalReport
 
@@ -122,16 +122,15 @@ def compare(first: Path = typer.Argument(..., help="Eval report, e.g. runs/eval-
 @app.command()
 def doctor() -> None:
     """Report GPU and environment status."""
-    from sopvision.doctor import GpuUnavailableError, gpu_report, in_container, require_gpu
+    from sopvision.doctor import GpuUnavailableError, gpu_report, require_gpu
 
     report = gpu_report()
-    container = in_container()
     typer.echo(f"cuda: {report.cuda_available}")
     typer.echo(f"gpu: {report.device_name}")
     typer.echo(f"torch: {report.torch_version}")
-    typer.echo(f"in_container: {container}")
+    typer.echo("deployment: docker")
     try:
-        require_gpu(container, report)
+        require_gpu(report)
     except GpuUnavailableError as e:
         typer.echo(str(e), err=True)
         raise typer.Exit(1)

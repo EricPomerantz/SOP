@@ -1,6 +1,6 @@
 """Sample training frames from the server_fan clips (spec §6.1 step 1).
 
-Usage: uv run python -m training.sample_frames --out data/frames
+Usage: docker compose run --rm tools -m training.sample_frames --out data/frames
 """
 
 import argparse

@@ -1,4 +1,4 @@
-"""Video sources: recorded files, USB webcams and RTSP cameras."""
+"""Video sources: recorded files and RTSP cameras."""
 
 from sopvision.sources.base import Frame, SourceUnavailableError, VideoSource
 

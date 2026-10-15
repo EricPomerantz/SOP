@@ -1,6 +1,6 @@
 """SOP layout calibration helpers: where slots are, written back into the SOP YAML.
 
-Slot centres for server_fan come from the user's reference boxes (`python -m training.reference_labels slots`);
+Slot centres for server_fan come from reference boxes (`docker compose run --rm tools -m training.reference_labels slots`);
 `sopvision calibrate --check` draws the configured centres on a recording to verify them.
 """
 

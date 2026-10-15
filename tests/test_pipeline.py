@@ -131,7 +131,7 @@ class BrokenSource:
 
     def frames(self):
         from sopvision.sources.base import SourceUnavailableError
-        raise SourceUnavailableError("Can't open webcam 0. Is it plugged in and not used by another app?")
+        raise SourceUnavailableError("Can't open RTSP camera. Check its network connection.")
         yield  # pragma: no cover
 
     def close(self):
@@ -151,7 +151,7 @@ async def test_source_that_fails_to_open_reports_its_error_not_an_incomplete_sop
     await asyncio.wait_for(run.done.wait(), 5)
     alerts = [m for m in run.messages if m["type"] == "alert"]
     assert [a["kind"] for a in alerts] == ["source_lost"]
-    assert alerts[0]["message"] == "Video source failed: Can't open webcam 0. Is it plugged in and not used by another app?"
+    assert alerts[0]["message"] == "Video source failed: Can't open RTSP camera. Check its network connection."
 
 
 async def test_processing_error_ends_the_run_with_an_alert(sop, tmp_path):

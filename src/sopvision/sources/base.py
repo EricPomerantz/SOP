@@ -1,4 +1,4 @@
-"""Video source contract shared by file, webcam and RTSP sources."""
+"""Video source contract shared by file and RTSP sources."""
 
 from collections.abc import Iterator
 from dataclasses import dataclass

@@ -13,7 +13,7 @@ def test_api_key_never_in_repr(monkeypatch):
 
 def test_missing_data_root_names_the_variable(monkeypatch, tmp_path):
     monkeypatch.setenv("SOP_DATA_ROOT", str(tmp_path / "nope"))
-    with pytest.raises(ConfigError, match="SOP_DATA_ROOT points to .*nope, which doesn't exist. Set it in .env."):
+    with pytest.raises(ConfigError, match=r"SOP_DATA_ROOT points to .*nope, which doesn't exist. Set SOP_DATASET_DIR"):
         Settings().check_data_root()
 
 
@@ -31,15 +31,18 @@ def test_gateway_settings_read_sdk_env_names(monkeypatch):
 
 def test_data_root_that_is_not_a_dataset_is_named(monkeypatch, tmp_path):
     monkeypatch.setenv("SOP_DATA_ROOT", str(tmp_path))  # exists, but no raw/ and test/
-    with pytest.raises(ConfigError, match=r"isn't a recordings dataset \(needs raw/ and test/ folders\)\. Set SOP_DATA_ROOT in \.env\."):
+    with pytest.raises(ConfigError, match=r"isn't a recordings dataset \(needs raw/ and test/ folders\)\. Set SOP_DATASET_DIR"):
         Settings().check_data_root()
 
 
-def test_container_message_points_at_the_compose_variable(monkeypatch, tmp_path):
-    monkeypatch.setenv("SOP_DATA_ROOT", str(tmp_path / "nope"))
-    monkeypatch.setenv("SOPVISION_IN_CONTAINER", "1")
-    with pytest.raises(ConfigError, match=r"Set SOP_DATASET_DIR in \.env"):
-        Settings().check_data_root()
+def test_defaults_match_compose_network_and_mounts(monkeypatch):
+    for variable in ("SOP_DATA_ROOT", "DATASETS_DIR", "DECIDER_URL", "LAYA_URL"):
+        monkeypatch.delenv(variable, raising=False)
+    settings = Settings(_env_file=None)
+    assert settings.decider_url == "http://decider:8001"
+    assert settings.laya_url == "http://laya:8000"
+    assert str(settings.sop_data_root) == "/data/server_fan"
+    assert str(settings.datasets_dir) == "/datasets"
 
 
 def test_valid_dataset_layout_passes(monkeypatch, tmp_path):

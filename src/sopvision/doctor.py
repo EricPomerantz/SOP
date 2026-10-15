@@ -1,10 +1,10 @@
 """GPU and environment checks shared by `doctor`, `serve` and `eval`."""
 
-import os
 from dataclasses import dataclass
 
 NO_GPU_MESSAGE = (
-    "No GPU visible in the container. Docker Desktop needs the WSL2 backend and the Windows NVIDIA driver; "
+    "No GPU visible in the container. Enable NVIDIA Container Toolkit on Linux, or the WSL2 backend and "
+    "NVIDIA driver for Docker Desktop; "
     "check: docker run --rm --gpus all nvidia/cuda:12.8.0-base-ubuntu24.04 nvidia-smi"
 )
 
@@ -31,11 +31,7 @@ def gpu_report() -> GpuReport:
     )
 
 
-def in_container() -> bool:
-    return os.environ.get("SOPVISION_IN_CONTAINER", "").strip().lower() in {"1", "true", "yes"}
-
-
-def require_gpu(in_container: bool, report: GpuReport) -> None:
-    """Fail in the container when no GPU is visible; natively a CPU run is allowed (just slow)."""
-    if in_container and not report.cuda_available:
+def require_gpu(report: GpuReport) -> None:
+    """Fail when the application container cannot access a GPU."""
+    if not report.cuda_available:
         raise GpuUnavailableError(NO_GPU_MESSAGE)

@@ -2,7 +2,7 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
-const api = "http://localhost:8000";
+const api = "http://sopvision:8000";
 
 export default defineConfig({
   plugins: [react()],
@@ -11,6 +11,9 @@ export default defineConfig({
       "/sops": api,
       "/sources": api,
       "/runs": api,
+      "/config": api,
+      "/recording": api,
+      "/latency": api,
       "/video.mjpg": api,
       "/ws": { target: api, ws: true },
     },

@@ -48,6 +48,16 @@ flowchart LR
 | `decider` | `decider` | Mapika/decider-4b behind its own `/v1/systemone` server (`docker/decider.Dockerfile`, `decider_serve.py`) |
 | `laya` | `laya` | Laya behind `laya-serve`; `LAYA_CHECKPOINT` swaps in a fine-tune (`docker/laya.Dockerfile`, `laya_serve.py`) |
 | `tests` | `test` | Unit tests in the app's environment plus the dev group |
+| `gpu-tests` | `test-gpu` | Opt-in GPU/API tests with mounted datasets and optional credentials |
+| `tools` | `tools` | Python data, labelling, calibration, and evaluation utilities with training dependencies |
+| `trainer` | `training` | The tools image with GPU access and a detector-training entrypoint |
+| `web-tests` | `test` | Frontend tests and production build with container-owned Node dependencies |
+| `web-dev` | `dev` | Vite development server (5173), forwarding API/WebSocket traffic to the app |
+| `labelstudio` | `labelling` | Browser annotation for detector and reference boxes (8080), with persistent project storage |
+
+Docker is the sole supported execution environment. Runtime model/SOP/scenario inputs remain read-only; tools
+have writable mounts for generated datasets, labels, calibration, models, and reports. Host virtual environments
+and Node installations are not required. `start.sh` and `stop.sh` orchestrate these containers.
 
 `DECISION_MODE` picks who drives the tracker: `jev` (default), `decider`, `laya`, or `compare` (Jev drives,
 `COMPARE_SHADOW` gets the same requests and both answers are logged side by side).
@@ -56,7 +66,7 @@ flowchart LR
 
 ```mermaid
 flowchart TD
-    src["Video source<br/>file · RTSP · webcam<br/><i>sources/</i>"] --> reader["LatestFrameReader<br/>keeps only the newest frame<br/><i>sources/latest.py</i>"]
+    src["Video source<br/>file · RTSP<br/><i>sources/</i>"] --> reader["LatestFrameReader<br/>keeps only the newest frame<br/><i>sources/latest.py</i>"]
     reader --> yolo["YoloDetector<br/>YOLO + ByteTrack<br/><i>perception/detector.py</i>"]
     yolo -->|detections| builder["SceneBuilder<br/>slots, hands, held parts, events<br/><i>scene/builder.py</i>"]
     builder -->|SceneState + events| core["RunCore<br/><i>pipeline.py</i>"]
@@ -122,7 +132,7 @@ src/sopvision/
   settings.py       environment / .env settings (decision mode, model URLs, paths)
   config.py         SOP YAML schema: steps, slots, order rules, thresholds
   pipeline.py       RunCore (tracker + logging + broadcast), LiveRun, run_lockstep
-  sources/          file, RTSP (low-latency), webcam sources; LatestFrameReader; source registry;
+  sources/          file and RTSP (low-latency) sources; LatestFrameReader; source registry;
                     camera delay measurement (latency.py)
   perception/       YoloDetector (Ultralytics + ByteTrack)
   scene/            SceneBuilder (detections → SceneState + events), geometry, video overlay
@@ -133,7 +143,7 @@ src/sopvision/
                     torque results and their attribution to slots (torque.py)
   storage/          append-only JSONL run log, run report (JSON/CSV)
   server/           FastAPI app (REST, /ws, MJPEG), RunManager (one run at a time), frame buffer
-  evaluation/       acceptance eval, Docker parity, scenario videos, Jev-vs-local metrics, request variants,
+  evaluation/       acceptance eval, report comparison, scenario videos, Jev-vs-local metrics, request variants,
                     SOP-driven deviation generators (deviations.py)
 web/                React + Vite dashboard (built into the app image)
 sops/               SOP definitions (server_fan.yaml); sops/drafts/ for SOPs without a trained detector yet (lug_bolts.yaml)

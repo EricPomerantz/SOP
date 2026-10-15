@@ -3,14 +3,14 @@
 The app works out *which* hole a result belongs to from where the wrench is in the video, so this only says *that*
 a tightening finished (and whether it reached torque).
 
-    python scripts/simulate_torque.py                     interactive: Enter = OK, "f" + Enter = not reached
-    python scripts/simulate_torque.py --log torque.csv    replay a recorded log in time with a video started now
-    python scripts/simulate_torque.py --every 5 --count 5 one OK result every 5 s
+    docker compose run --rm tools scripts/simulate_torque.py
+    docker compose run --rm tools scripts/simulate_torque.py --log datasets/lug_bolts/runs/<run>/torque.csv
+    docker compose run --rm tools scripts/simulate_torque.py --every 5 --count 5
 
-    --url http://localhost:8000 (default)    --torque 110 (Nm reported with each result)
+    --url http://sopvision:8000 (default)    --torque 110 (Nm reported with each result)
 
-The run is the one currently running in the app (`GET /runs/current`). From inside Docker:
-    docker compose run --rm --entrypoint python sopvision scripts/simulate_torque.py --url http://sopvision:8000 ...
+The run is the one currently running in the app (`GET /runs/current`). With no replay or interval options,
+Enter sends OK, "f" + Enter sends not reached, and "q" + Enter quits.
 """
 
 import argparse
@@ -39,7 +39,7 @@ def send(url: str, run_id: str, ok: bool, torque_nm: float | None) -> None:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--url", default="http://localhost:8000")
+    ap.add_argument("--url", default="http://sopvision:8000")
     ap.add_argument("--log", type=Path, help="torque.csv to replay (time_s, ok, torque_nm)")
     ap.add_argument("--every", type=float, help="seconds between OK results")
     ap.add_argument("--count", type=int, default=5)

@@ -5,6 +5,11 @@ of Jev on our SOP (`benchmarks/sop-244/RESULTS.md`), so the plan is to fine-tune
 The commands below are for server fan; for another SOP add `--sop <file>` to the capture, build, freeze, probe and
 benchmark scripts (its recordings come from the SOP file's `dataset` section, see `sopvision/recordings.py`).
 
+All commands run in containers. Build `sopvision`, `tools`, and `laya` before the first run. No host Python or
+virtual environment is needed. Stop active runs/recordings before freeing GPU services for training; keep the
+`hf_cache` volume and existing checkpoint directories. For non-GPU data tools, the `tools` service supplies writable
+data/benchmark/SOP/dataset mounts, e.g. `docker compose run --rm tools scripts/build_training_set.py --help`.
+
 ```bash
 # 1. Replay the train/validation recordings through the real detector + tracker and log every decision request (GPU, ~10 min)
 docker compose run --rm --entrypoint python sopvision scripts/capture_requests.py --out data/training/captures

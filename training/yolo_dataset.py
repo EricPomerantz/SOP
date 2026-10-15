@@ -1,6 +1,6 @@
 """Assemble the Ultralytics dataset folder (images/, labels/, dataset.yaml) from labelled frames.
 
-Usage: uv run python -m training.yolo_dataset   (data/frames + data/labels_auto → data/yolo)
+Usage: docker compose run --rm tools -m training.yolo_dataset   (data/frames + data/labels_auto → data/yolo)
 """
 
 import argparse

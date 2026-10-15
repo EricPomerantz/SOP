@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 import yaml
+import httpx
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
 
@@ -15,7 +16,6 @@ from sopvision.server.runs import RunManager, startup_checks
 from sopvision.settings import Settings
 from sopvision.sop.types import StepUpdate
 
-WEBCAM_IN_CONTAINER = "Webcam isn't available in the container — run natively or use an RTSP source."
 GPU = GpuReport(True, "NVIDIA GeForce RTX 4080", "x")
 
 
@@ -69,12 +69,6 @@ def client(tmp_path):
         yield c
 
 
-@pytest.fixture
-def client_in_container(tmp_path):
-    with make_client(tmp_path, sopvision_in_container=True) as c:
-        yield c
-
-
 def start(c, source="test:Install_12"):
     return c.post("/runs", json={"sop": "server_fan_install", "source_id": source})
 
@@ -85,14 +79,48 @@ def test_sops_list_steps_with_labels(client):
         "id": "fan_1", "label": "Fan 1", "text": "Install the first fan by connecting the connector, then pressing the fan in place."}
 
 
-def test_sources_hide_webcam_in_container(client_in_container):
-    sources = client_in_container.get("/sources").json()
+def test_sources_exclude_webcams(client):
+    sources = client.get("/sources").json()
     assert sources and all(s["kind"] != "webcam" for s in sources)
 
 
-def test_webcam_rejected_in_container(client_in_container):
-    r = start(client_in_container, "webcam:0")
-    assert r.status_code == 400 and r.json()["detail"] == WEBCAM_IN_CONTAINER
+def test_legacy_webcam_request_has_migration_hint(client):
+    response = start(client, "webcam:0")
+    assert response.status_code == 400
+    assert response.json()["detail"] == "USB webcams are no longer supported. Use an RTSP source or a video file."
+
+
+def test_docker_smoke_accepts_multiple_sops_and_keeps_active_run(client):
+    from scripts.docker_smoke import check_server
+
+    run_id = start(client).json()["run_id"]
+    sops, sources = check_server(client)
+    assert sops == 2 and sources >= 2
+    assert client.get("/runs/current").json()["run_id"] == run_id
+    assert client.post(f"/runs/{run_id}/stop").status_code == 200
+
+
+def test_docker_smoke_checks_http_failures():
+    from scripts.docker_smoke import check_server
+
+    with httpx.Client(base_url="http://sopvision:8000", transport=httpx.MockTransport(
+            lambda request: httpx.Response(503, json={"detail": "not ready"}))) as client:
+        with pytest.raises(httpx.HTTPStatusError):
+            check_server(client)
+
+
+@pytest.mark.parametrize("arguments, expected", [([], "http://sopvision:8000"),
+                                                (["--url", "http://gateway:9000"], "http://gateway:9000")])
+def test_torque_simulator_uses_container_url_by_default(monkeypatch, arguments, expected):
+    import sys
+
+    from scripts import simulate_torque
+
+    urls = []
+    monkeypatch.setattr(sys, "argv", ["simulate_torque.py", "--every", "1", "--count", "0", *arguments])
+    monkeypatch.setattr(simulate_torque, "current_run", lambda url: urls.append(url) or "test-run")
+    assert simulate_torque.main() == 0
+    assert urls == [expected]
 
 
 def test_unknown_source_is_404(client):

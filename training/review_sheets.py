@@ -1,6 +1,6 @@
 """Contact sheets of generated labels, one per recording, for a quick human check.
 
-Usage: uv run python -m training.review_sheets   (writes data/labels_review/Install_<run>.jpg)
+Usage: docker compose run --rm tools -m training.review_sheets   (writes data/labels_review/Install_<run>.jpg)
 """
 
 import argparse

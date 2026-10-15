@@ -40,7 +40,7 @@ class FileSource:
                 ok, image = cap.read()
                 if not ok:
                     return
-                # Some files and most webcams report 0 fps; fall back to the decoder's timestamp.
+                # Some files report 0 fps; fall back to the decoder's timestamp.
                 t = index / self.fps if self.fps > 0 else cap.get(cv2.CAP_PROP_POS_MSEC) / 1000.0
                 if self.mode == "realtime":
                     self._pace(t)

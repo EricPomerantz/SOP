@@ -1,9 +1,9 @@
 """Label Studio round trip for reviewing auto-labels (spec §6.1 step 4).
 
 Usage:
-  uv run python -m training.labelstudio config                         # labelling interface XML
-  uv run python -m training.labelstudio export --out data/labelstudio/tasks.json
-  uv run python -m training.labelstudio import --export data/labelstudio/export.json
+    docker compose run --rm tools -m training.labelstudio config
+    docker compose run --rm tools -m training.labelstudio export --out data/labelstudio/tasks.json
+    docker compose run --rm tools -m training.labelstudio import --export data/labelstudio/export.json
 """
 
 import argparse

@@ -1,11 +1,9 @@
+import json
+from types import SimpleNamespace
+
 import pytest
 
-from training.reference_labels import REFERENCE_GROUPS, display_to_image
-
-
-def test_display_boxes_scale_back_to_image_pixels():
-    # selectROIs returns (x, y, w, h) in the downscaled window; we store xyxy in full-resolution pixels
-    assert display_to_image([(100, 50, 200, 100)], scale=0.5) == [(200.0, 100.0, 600.0, 300.0)]
+from training.reference_labels import REFERENCE_GROUPS, export_reference_tasks, import_reference_annotations
 
 
 def test_reference_groups_cover_every_part_class_once():
@@ -109,3 +107,118 @@ def test_low_separation_bays_still_label_when_visible():
     cls, reason = decide_bay("empty", d_empty=0.35, d_full=0.7, separation=0.45, occluded=False,
                              empty_cls="psu_bay_empty", full_cls="psu")
     assert (cls, reason) == ("psu_bay_empty", None)
+
+
+@pytest.fixture
+def reference_tasks(tmp_path, monkeypatch):
+    from training import reference_labels
+
+    reference = tmp_path / "Install_4.json"
+    original = {"run": 4, "frames": {
+        "start": {"t": 0.3, "boxes": [{"cls": "chassis", "xyxy": [20.1, 10.4, 180.3, 90.6]},
+                                     {"cls": "psu_bay_empty", "xyxy": [30, 20, 50, 40]}]},
+        "filled": {"t": 74.8, "boxes": [{"cls": "fan", "xyxy": [20, 20, 60, 60]}]},
+        "covered": {"t": 86.0, "boxes": [{"cls": "cover", "xyxy": [20, 10, 100, 90]}]},
+    }}
+    reference.write_text(json.dumps(original))
+    monkeypatch.setattr(reference_labels, "load_index", lambda root: [SimpleNamespace(run=4, raw_path="video.mp4")])
+    monkeypatch.setattr(reference_labels, "read_frame", lambda video, timestamp: np.zeros((100, 200, 3), np.uint8))
+    tasks = tmp_path / "tasks.json"
+    assert export_reference_tasks(4, tasks, tmp_path, reference) == 3
+    return reference, tasks, original
+
+
+def test_reference_labelstudio_round_trip_preserves_schema_and_pixels(reference_tasks):
+    reference, tasks_path, original = reference_tasks
+    tasks = json.loads(tasks_path.read_text())
+    assert tasks[0]["data"]["image"] == "/data/local-files/?d=Install_4_start.png"
+    assert (tasks[0]["data"]["width"], tasks[0]["data"]["height"]) == (200, 100)
+    assert (tasks_path.parent / "Install_4_start.png").is_file()
+    for task in tasks:
+        task["annotations"] = [{"id": 1, "result": task["predictions"][0]["result"]}]
+    tasks_path.write_text(json.dumps(tasks))
+    assert import_reference_annotations(tasks_path, reference.parent) == [reference]
+    assert json.loads(reference.read_text()) == original
+
+
+def test_reference_partial_review_keeps_other_classes_and_frames(reference_tasks):
+    reference, tasks_path, original = reference_tasks
+    tasks = json.loads(tasks_path.read_text())
+    start = tasks[0]
+    start["data"]["classes"] = ["psu_bay_empty"]
+    result = start["predictions"][0]["result"][1]
+    result["value"]["x"] = 25
+    start["annotations"] = [{"result": [result]}]
+    tasks_path.write_text(json.dumps(tasks))
+    import_reference_annotations(tasks_path, reference.parent)
+    saved = json.loads(reference.read_text())
+    assert saved["frames"]["start"]["boxes"] == [original["frames"]["start"]["boxes"][0],
+                                                {"cls": "psu_bay_empty", "xyxy": [50, 20, 70, 40]}]
+    assert saved["frames"]["filled"] == original["frames"]["filled"]
+
+
+def test_first_reference_import_creates_readable_pixel_artifact(reference_tasks, tmp_path):
+    _, tasks_path, original = reference_tasks
+    tasks = json.loads(tasks_path.read_text())
+    for task in tasks:
+        task["annotations"] = [{"result": task["predictions"][0]["result"]}]
+    tasks_path.write_text(json.dumps(tasks))
+    output = tmp_path / "new-reference"
+    paths = import_reference_annotations(tasks_path, output)
+    assert paths == [output / "Install_4.json"]
+    assert json.loads(paths[0].read_text()) == original
+    assert paths[0].stat().st_mode & 0o777 == 0o644
+
+
+def test_empty_review_clears_only_selected_classes(reference_tasks):
+    reference, tasks_path, original = reference_tasks
+    tasks = json.loads(tasks_path.read_text())
+    tasks[0]["data"]["classes"] = ["psu_bay_empty"]
+    tasks[0]["annotations"] = [{"result": []}]
+    tasks_path.write_text(json.dumps(tasks))
+    import_reference_annotations(tasks_path, reference.parent)
+    assert json.loads(reference.read_text())["frames"]["start"]["boxes"] == [original["frames"]["start"]["boxes"][0]]
+
+
+def test_unreviewed_and_cancelled_tasks_leave_reference_untouched(reference_tasks):
+    reference, tasks_path, _ = reference_tasks
+    before = reference.read_bytes()
+    tasks = json.loads(tasks_path.read_text())
+    tasks[0]["annotations"] = [{"was_cancelled": True, "result": []}]
+    tasks_path.write_text(json.dumps(tasks))
+    assert import_reference_annotations(tasks_path, reference.parent) == []
+    assert reference.read_bytes() == before
+
+
+@pytest.mark.parametrize("invalid", ["class", "dimensions", "bounds", "rotation", "time", "duplicate"])
+def test_invalid_annotations_do_not_overwrite_reference(reference_tasks, invalid):
+    reference, tasks_path, _ = reference_tasks
+    before = reference.read_bytes()
+    tasks = json.loads(tasks_path.read_text())
+    for task in tasks:
+        task["annotations"] = [{"result": task["predictions"][0]["result"]}]
+    result = tasks[-1]["annotations"][0]["result"][0]
+    if invalid == "class":
+        result["value"]["rectanglelabels"] = ["not-a-reference-class"]
+    elif invalid == "dimensions":
+        result["original_width"] = 999
+    elif invalid == "bounds":
+        result["value"]["x"] = 101
+    elif invalid == "rotation":
+        result["value"]["rotation"] = 90
+    elif invalid == "time":
+        tasks[-1]["data"]["t"] = 999
+    else:
+        tasks.append(tasks[0])
+    tasks_path.write_text(json.dumps(tasks))
+    with pytest.raises(ValueError):
+        import_reference_annotations(tasks_path, reference.parent)
+    assert reference.read_bytes() == before
+
+
+def test_selective_export_contains_only_requested_classes(reference_tasks):
+    reference, tasks_path, _ = reference_tasks
+    assert export_reference_tasks(4, tasks_path, reference.parent, reference, {"psu_bay_empty"}) == 1
+    task = json.loads(tasks_path.read_text())[0]
+    assert task["data"]["classes"] == ["psu_bay_empty"]
+    assert len(task["predictions"][0]["result"]) == 1
