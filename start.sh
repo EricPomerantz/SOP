@@ -8,7 +8,8 @@
 #
 # The model only lasts for this start: .env's DECISION_MODE / LAYA_CHECKPOINT are the defaults and are not edited.
 # Model services the choice doesn't need are stopped, to free the GPU. The app is not restarted while a run or a
-# recording is in progress (--force to do it anyway). Take everything down with ./stop.sh.
+# recording is in progress (--force to do it anyway). The worker (the SOP builder's background jobs) starts too.
+# Take everything down with ./stop.sh.
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -141,6 +142,8 @@ fi
 
 DECISION_MODE=$model COMPARE_SHADOW=${shadow:-decider} LAYA_CHECKPOINT=${laya_ckpt:-} \
   docker compose up -d --force-recreate sopvision
+# The worker runs the SOP builder's jobs (timeline drafts, slot auto-fit, training); idle, it holds no GPU memory.
+docker compose up -d worker
 
 printf 'Waiting for the app'
 for _ in $(seq 60); do

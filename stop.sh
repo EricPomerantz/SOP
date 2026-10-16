@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Take the app down: the dashboard, the model services (Laya, Decider) and Label Studio.
+# Take the app down: the dashboard, the jobs worker, the model services (Laya, Decider) and Label Studio.
 #
 #   ./stop.sh                  # everything
 #   ./stop.sh --keep-models    # leave Laya / Decider loaded (a restart with the same model is then quick)
 #   ./stop.sh --keep-labelstudio
-#   ./stop.sh --force          # even while a run or recording is in progress (it is cut off)
+#   ./stop.sh --force          # even while a run, recording or job is in progress (it is cut off)
 #
 # Containers are stopped and removed; volumes are kept (model weights cache, Label Studio projects and logins),
 # as are runs/, datasets/ and data/.
@@ -33,7 +33,16 @@ if (( ! force )) && busy; then
   exit 1
 fi
 
-services=(sopvision)
+# A running job (training can take an hour) is lost if the worker stops: it is marked failed on the next start.
+running_job() {
+  grep -l '"state": "running"' data/jobs/*/job.json 2>/dev/null | head -n1
+}
+if (( ! force )) && [[ -n $(running_job) ]]; then
+  echo "A background job is running ($(dirname "$(running_job)")): cancel it in the SOP builder first (or pass --force)." >&2
+  exit 1
+fi
+
+services=(sopvision worker)
 (( keep_models )) || services+=(laya decider)
 (( keep_ls )) || services+=(labelstudio)
 compose=(docker compose --profile laya --profile decider --profile labelling)

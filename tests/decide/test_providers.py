@@ -205,3 +205,20 @@ def test_laya_readiness_reads_laya_health():
     cpu = up | {"checkpoint_devices": {"english": "cpu"}}
     r = laya_readiness("http://l", http=http(health=cpu, probe=GOOD_PROBE))
     assert (r.inference, r.gpu, r.ready) == (True, False, False)
+
+
+def test_laya_asks_for_the_sops_own_checkpoint_when_the_registry_names_one(tmp_path):
+    from sopvision.decide.laya_registry import load, set_checkpoint
+
+    registry = tmp_path / "registry.json"
+    s = settings("laya", laya_registry=registry)
+    assert make_client(s, "laya", "lug_bolts_torque").model == "english"  # no registry yet: the shared checkpoint
+    set_checkpoint(registry, "lug_bolts_torque", "data/training/models/Lug-v3")
+    assert load(registry) == {"lug_bolts_torque": "Lug-v3"}
+    assert make_client(s, "laya", "lug_bolts_torque").model == "ckpt-lug-v3"
+    assert make_client(s, "laya", "server_fan_install").model == "english"
+    assert make_client(s, "laya", "lug_bolts_torque", laya_model="ckpt-candidate").model == "ckpt-candidate"
+    assert clients_for(settings("compare", compare_shadow="laya", laya_registry=registry), "lug_bolts_torque")[1].model \
+        == "ckpt-lug-v3"
+    set_checkpoint(registry, "lug_bolts_torque", None)
+    assert make_client(s, "laya", "lug_bolts_torque").model == "english"

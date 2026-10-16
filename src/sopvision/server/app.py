@@ -11,6 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from sopvision.config import ConfigError
+from sopvision.jobs.store import JobNotFound, JobStore
 from sopvision.server.runs import NoTorqueToolError, NotFoundError, NotPausableError, RunConflictError, RunManager
 from sopvision.settings import Settings
 from sopvision.sources.base import SourceUnavailableError
@@ -42,6 +43,11 @@ class StartRecording(BaseModel):
 class Torque(BaseModel):
     ok: bool  # the tightening reached the target torque
     torque_nm: float | None = None
+
+
+class NewJob(BaseModel):
+    kind: str
+    params: dict = {}
 
 
 class Control(BaseModel):
@@ -204,6 +210,48 @@ def create_app(settings: Settings, manager: RunManager) -> FastAPI:
             raise HTTPException(400, str(e)) from None
         return {"ok": True}
 
+    jobs = JobStore(settings.jobs_dir)
+
+    def job_view(job, log: bool = False) -> dict:
+        out = job.to_dict()
+        out["cancel_requested"] = jobs.cancel_requested(job.id)
+        if log:
+            out["log"] = jobs.log_tail(job.id)
+        return out
+
+    @app.post("/jobs", status_code=201)
+    def create_job(body: NewJob):
+        """Queue a job for the worker service. Kinds and their commands are fixed (sopvision.jobs.kinds)."""
+        from sopvision.jobs.kinds import UnknownJobKind, build
+
+        try:
+            title, steps, result = build(body.kind, settings, body.params)
+        except UnknownJobKind as e:
+            raise HTTPException(404, str(e)) from None
+        except ConfigError as e:
+            raise HTTPException(400, str(e)) from None
+        sop = body.params.get("sop_file")
+        return job_view(jobs.create(body.kind, title, steps, sop=str(sop) if sop else None, params=body.params,
+                                    result=result))
+
+    @app.get("/jobs")
+    def list_jobs(sop: str | None = None, kind: str | None = None):
+        return [job_view(j) for j in jobs.list(sop, kind)]
+
+    @app.get("/jobs/{job_id}")
+    def get_job(job_id: str):
+        try:
+            return job_view(jobs.get(job_id), log=True)
+        except JobNotFound:
+            raise HTTPException(404, f"No job {job_id}") from None
+
+    @app.post("/jobs/{job_id}/cancel")
+    def cancel_job(job_id: str):
+        try:
+            return job_view(jobs.cancel(job_id))
+        except JobNotFound:
+            raise HTTPException(404, f"No job {job_id}") from None
+
     @app.get("/runs/current")
     def current():
         snap = manager.current()
@@ -243,6 +291,17 @@ def create_app(settings: Settings, manager: RunManager) -> FastAPI:
             pass
         finally:
             manager.subscribers.discard(queue)
+
+    from fastapi.responses import JSONResponse
+
+    from sopvision.builder.drafts import DraftError
+    from sopvision.server.builder_api import builder_router
+
+    app.include_router(builder_router(settings, manager))
+
+    @app.exception_handler(DraftError)
+    async def draft_error(_request, exc: DraftError):
+        return JSONResponse({"detail": str(exc)}, status_code=404 if str(exc).startswith("No SOP") else 400)
 
     if WEB_DIST.is_dir():
         app.mount("/", StaticFiles(directory=WEB_DIST, html=True), name="web")

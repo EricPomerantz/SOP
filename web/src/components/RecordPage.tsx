@@ -3,13 +3,13 @@ import { httpApi, type Api } from "../api";
 import type { RecordingSop, RecordingStatus, RecordingSummary, SourceSpec } from "../types";
 import { TorqueButtons } from "./TorqueButtons";
 
-type Props = { api?: Api; poll?: number; confirm?: (message: string) => boolean };
+type Props = { api?: Api; poll?: number; confirm?: (message: string) => boolean; initialSop?: string };
 
 /**
  * Record a camera into an SOP's dataset (no detector needed): video plus "torque reached" presses on the video's
  * timeline, written as runs/<name>/{video.mp4, torque.csv} and listed in splits.yaml.
  */
-export function RecordPage({ api = httpApi, poll = 1000, confirm = (m) => window.confirm(m) }: Props) {
+export function RecordPage({ api = httpApi, poll = 1000, confirm = (m) => window.confirm(m), initialSop }: Props) {
   const [sops, setSops] = useState<RecordingSop[]>([]);
   const [sources, setSources] = useState<SourceSpec[]>([]);
   const [sopFile, setSopFile] = useState("");
@@ -25,7 +25,7 @@ export function RecordPage({ api = httpApi, poll = 1000, confirm = (m) => window
   const refresh = useCallback(() => api.getRecording?.().then(setStatus).catch(() => {}), [api]);
 
   useEffect(() => {
-    api.getRecordingSops?.().then((s) => { setSops(s); setSopFile((f) => f || s[0]?.file || ""); }).catch((e) => setError(String(e.message ?? e)));
+    api.getRecordingSops?.().then((s) => { setSops(s); setSopFile((f) => f || s.find((x) => x.file === initialSop || x.file.endsWith(`/${initialSop}`))?.file || s[0]?.file || ""); }).catch((e) => setError(String(e.message ?? e)));
     api.getRecordingSopErrors?.().then(setSopErrors).catch(() => {});
     api.getSources().then((all) => {
       const live = all.filter((s) => s.kind !== "file");

@@ -32,7 +32,9 @@ PROBE = {"state": {"light": "red"},
                               "criteria": {"go": None, "stop": None}}}}
 
 
-def make_client(settings: Settings, provider: str) -> JevClient:
+def make_client(settings: Settings, provider: str, sop_id: str | None = None, laya_model: str | None = None) -> JevClient:
+    """A client for `provider`. Laya answers with the SOP's own checkpoint when the registry names one
+    (decide/laya_registry.py), or `laya_model` when given (a candidate checkpoint under evaluation)."""
     if provider == "jev":
         return JevClient(settings.typesafe_api_key.get_secret_value(), settings.typesafe_base_url, settings.typesafe_model)
     if provider == "decider":
@@ -40,17 +42,21 @@ def make_client(settings: Settings, provider: str) -> JevClient:
         return JevClient("local", settings.decider_url, DECIDER_MODEL, timeout=settings.decider_timeout, provider="decider")
     if provider == "laya":
         budgets = {"max_len": settings.laya_max_len, "head_max_len": settings.laya_head_max_len}
-        return JevClient("local", settings.laya_url, settings.laya_model, timeout=settings.decider_timeout, provider="laya",
+        from sopvision.decide.laya_registry import laya_model_for
+
+        model = laya_model or laya_model_for(settings, sop_id)
+        return JevClient("local", settings.laya_url, model, timeout=settings.decider_timeout, provider="laya",
                          extra_body={k: v for k, v in budgets.items() if v is not None} or None)
     raise ValueError(f"unknown decision provider {provider!r}")
 
 
-def clients_for(settings: Settings) -> tuple[JevClient, JevClient | None]:
-    """(authoritative client, shadow client or None) for the configured DECISION_MODE."""
+def clients_for(settings: Settings, sop_id: str | None = None,
+                laya_model: str | None = None) -> tuple[JevClient, JevClient | None]:
+    """(authoritative client, shadow client or None) for the configured DECISION_MODE, for one SOP's requests."""
     mode = settings.decision_mode
     if mode == "compare":
-        return make_client(settings, "jev"), make_client(settings, settings.compare_shadow)
-    return make_client(settings, mode), None
+        return make_client(settings, "jev"), make_client(settings, settings.compare_shadow, sop_id, laya_model)
+    return make_client(settings, mode, sop_id, laya_model), None
 
 
 def uses_jev(settings: Settings) -> bool:

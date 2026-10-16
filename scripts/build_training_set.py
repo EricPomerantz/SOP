@@ -33,6 +33,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from bench_decisions import labeller  # noqa: E402
 from freeze_benchmark import extract  # noqa: E402
 
+from sopvision.builder.timelines import read_rows  # noqa: E402
 from sopvision.config import SopConfig, list_sops, load_sop  # noqa: E402
 from sopvision.decide.questions import QuestionSet, wire_questions  # noqa: E402
 from sopvision.evaluation.deviations import ELIGIBLE, GENERATORS  # noqa: E402
@@ -48,11 +49,17 @@ def state_key(state: dict) -> str:
     return hashlib.sha256(json.dumps(state).encode()).hexdigest()
 
 
-def labels(rec: dict, segments) -> dict:
+def labels(rec: dict, segments, raw_rows=None) -> dict:
+    """`raw_rows`: the recording's steps.csv as written (idle and off_sop apart). With it, off-SOP stretches are
+    labelled "off_sop" instead of "idle", so the model learns to say off-SOP (the tracker's off_sop alert)."""
     gt = rec["ground_truth"] or {}
     out = {}
     if gt.get("current_step"):
         out["current_step"] = "idle" if len(gt["current_step"]) > 1 else gt["current_step"][0]
+        if raw_rows and out["current_step"] == "idle":
+            at = next((step for step, a, b in raw_rows if a <= rec["t_request"] < b), None)
+            if at == "off_sop":
+                out["current_step"] = "off_sop"
     active = rec["request"]["questions"]["active_step_id"]
     seg_end = max((s.end for s in segments if s.step_id == active), default=None)
     if seg_end is not None and abs(rec["t_request"] - seg_end) > BOUNDARY:
@@ -113,6 +120,8 @@ def main() -> int:
                     help="frozen sets whose states must not appear in training (missing folders are skipped)")
     ap.add_argument("--sop", type=Path, default=None, help="SOP file (default: the first in sops/)")
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--off-sop-label", action="store_true",
+                    help="label off-SOP stretches 'off_sop' (timeline datasets); default: 'idle', as sop-v1 was built")
     args = ap.parse_args()
     if (args.out / "train.jsonl").exists():
         print(f"{args.out} already exists; refusing to overwrite", file=sys.stderr)
@@ -136,7 +145,9 @@ def main() -> int:
             print(f"refusing {path}: {source} is not a train/val recording of {sop.sop}", file=sys.stderr)
             return 1
         split, segments = recording.split, recording.segments
-        base = [(r, labels(r, segments)) for r in records]
+        steps_csv = recording.video.parent / "steps.csv"
+        raw = read_rows(steps_csv) if args.off_sop_label and steps_csv.exists() else None
+        base = [(r, labels(r, segments, raw)) for r in records]
         base = [(r, lab) for r, lab in base if lab]
         out = rows[split]
         start = len(out)
@@ -161,7 +172,7 @@ def main() -> int:
     rows = {split: [r for r in items if state_key(r["state"]) not in frozen_states] for split, items in rows.items()}
 
     args.out.mkdir(parents=True, exist_ok=True)
-    manifest = {"seed": args.seed, "sop": sop.sop, "captures": str(args.captures),
+    manifest = {"seed": args.seed, "sop": sop.sop, "captures": str(args.captures), "off_sop_label": args.off_sop_label,
                 "excluded": "test-split recordings (never captured or used)",
                 "dropped_identical_to_frozen": dropped, "splits": {}}
     for split, items in rows.items():

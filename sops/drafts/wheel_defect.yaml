@@ -1,0 +1,31 @@
+sop: wheel_defect
+name: Demo Wheel Defects
+version: 1
+description: checking wheels for defects
+detector:
+  weights: models/wheel_defect/detector-20261016-153104.pt
+  classes:
+  - Defect
+  - Good Bolt
+  - Wrong Bolt
+  - Missing Bolt
+  roles:
+    Good Bolt: part
+    Missing Bolt: empty
+    Wrong Bolt: part
+layout:
+  anchor: Defect
+  match_radius: 0.1
+  slots: {}
+  tools: []
+steps: []
+order: strict
+off_sop: Any action that is not one of the steps above.
+idle: No one is working.
+decisions:
+  accept_confidence: 0.8
+  hold_seconds: 1
+  evidence_only_after: 1
+dataset:
+  format: timeline
+  dir: wheel_defect

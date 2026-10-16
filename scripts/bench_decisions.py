@@ -29,6 +29,7 @@ from pathlib import Path
 from sopvision.config import SopConfig, list_sops, load_sop
 from sopvision.decide.compare import comparison_record, provider_entry
 from sopvision.decide.jev_client import JevUnavailableError
+from sopvision.decide.laya_registry import laya_model_for
 from sopvision.decide.providers import make_client
 from sopvision.decide.questions import QuestionSet
 from sopvision.decide.types import ProviderResult
@@ -93,8 +94,8 @@ def single_record(r: dict, state: dict, qs: QuestionSet, result: ProviderResult)
 
 
 async def replay(items: list[tuple[str, dict]], settings: Settings, accept: float, variant,
-                 providers: list[str]) -> list[tuple[str, dict]]:
-    clients = [make_client(settings, p) for p in providers]
+                 providers: list[str], sop_id: str | None = None, laya_model: str | None = None) -> list[tuple[str, dict]]:
+    clients = [make_client(settings, p, sop_id, laya_model) for p in providers]
     out = []
     try:
         for i, (source, r) in enumerate(items):
@@ -122,11 +123,11 @@ def decider_info(settings: Settings) -> dict | None:
         return None
 
 
-def laya_info(settings: Settings) -> dict:
+def laya_info(settings: Settings, model: str) -> dict:
     """Laya checkpoint, budgets and what the server reports, for reproducibility."""
     import httpx
 
-    info = {"model": settings.laya_model, "max_len": settings.laya_max_len, "head_max_len": settings.laya_head_max_len}
+    info = {"model": model, "max_len": settings.laya_max_len, "head_max_len": settings.laya_head_max_len}
     try:
         info["health"] = httpx.get(f"{settings.laya_url}/health", timeout=5).json()
     except (httpx.HTTPError, ValueError):
@@ -145,6 +146,8 @@ def main() -> int:
     ap.add_argument("--limit", type=int, default=None, help="first N requests per log")
     ap.add_argument("--out", type=Path, default=None)
     ap.add_argument("--sop", type=Path, default=None, help="SOP file (default: the first in sops/)")
+    ap.add_argument("--laya-model", default=None, help="the Laya model to ask (default: the SOP's checkpoint in the "
+                                                       "registry, else LAYA_MODEL), e.g. a candidate under evaluation")
     args = ap.parse_args()
     stamp = time.strftime('%Y%m%d-%H%M%S')
     if args.out is None:
@@ -167,7 +170,8 @@ def main() -> int:
         if not 1 <= len(providers) <= 2:
             print("--providers takes one or two providers", file=sys.stderr)
             return 2
-        items = asyncio.run(replay(items, settings, accept, lambda r: variant(r, sop), providers))
+        items = asyncio.run(replay(items, settings, accept, lambda r: variant(r, sop), providers, sop.sop,
+                                   args.laya_model))
     apply = (lambda source, r: r) if args.frozen else labeller(settings, sop)
     records = [apply(source, r) | {"source": source, "expected_steps": expected[(source, r["request_id"])]} for source, r in items]
     summary = summarize(records, accept)
@@ -182,7 +186,8 @@ def main() -> int:
     json_path.write_text(json.dumps({"logs": [str(p) for p in args.logs], "frozen": str(args.frozen) if args.frozen else None,
                                      "variant": args.variant, "replayed": not args.no_replay, "providers": args.providers,
                                      "decider": decider_info(settings) if "decider" in args.providers else None,
-                                     "laya": laya_info(settings) if "laya" in args.providers else None,
+                                     "laya": laya_info(settings, args.laya_model or laya_model_for(settings, sop.sop))
+                                     if "laya" in args.providers else None,
                                      "summary": summary}, indent=2), encoding="utf-8")
     for line in summary_text(summary):
         print(line)

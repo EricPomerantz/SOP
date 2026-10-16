@@ -41,6 +41,7 @@ class JevClient:
                                       http_client=httpx2.AsyncClient(verify=False))
         self.sdk, self.timeout, self.max_retries, self._sleep = sdk, timeout, max_retries, sleep
         self.provider, self.extra_body = provider, extra_body  # extra_body: server-specific request fields (Laya)
+        self.model = model
 
     async def ask(self, state: dict, qs: QuestionSet) -> JevAnswers:
         from typesafe_sdk import Choice, Noul

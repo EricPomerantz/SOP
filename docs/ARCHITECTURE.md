@@ -46,7 +46,8 @@ flowchart LR
 |---|---|---|
 | `sopvision` | default | The app: FastAPI server, run pipeline, built dashboard (`Dockerfile`) |
 | `decider` | `decider` | Mapika/decider-4b behind its own `/v1/systemone` server (`docker/decider.Dockerfile`, `decider_serve.py`) |
-| `laya` | `laya` | Laya behind `laya-serve`; `LAYA_CHECKPOINT` swaps in a fine-tune (`docker/laya.Dockerfile`, `laya_serve.py`) |
+| `laya` | `laya` | Laya behind `laya-serve`; `LAYA_CHECKPOINT` swaps in a shared fine-tune, `registry.json` adds one per SOP (`docker/laya.Dockerfile`, `laya_serve.py`) |
+| `worker` | default | Runs the SOP builder's background jobs (timeline drafts, slot auto-fit, Laya training) from `data/jobs` (`Dockerfile` target `worker`) |
 | `tests` | `test` | Unit tests in the app's environment plus the dev group |
 | `gpu-tests` | `test-gpu` | Opt-in GPU/API tests with mounted datasets and optional credentials |
 | `tools` | `tools` | Python data, labelling, calibration, and evaluation utilities with training dependencies |
@@ -123,6 +124,17 @@ flowchart LR
 
 The camera's delay (how far its frames trail reality) is measured with the dashboard's latency page (`/#/latency`,
 `sources/latency.py`) and stored per camera; recorded videos have none.
+
+## The SOP builder (dashboard `#/sops`)
+
+A new SOP is built in the dashboard from a trained YOLO detection model (docs/sop-builder.md):
+detector import and class roles → recordings (`#/record`) → slot layout (auto-fit) → steps and order → step
+timelines (`#/sops/<id>/runs/<run>`) → the SOP's own Laya checkpoint → publish. Drafts live in `sops/drafts/`
+(`sopvision.builder.drafts`); publishing moves them into `sops/` and reloads the app's SOPs without a restart.
+GPU work is queued as jobs (`sopvision.jobs`: a folder per job under `data/jobs`, fixed job kinds, never commands
+from a request) and run one at a time by the `worker` service. Each SOP can have its own Laya checkpoint
+(`data/training/models/registry.json`, `sopvision.decide.laya_registry`); the Laya service serves them side by
+side and the app names the SOP's checkpoint in each request.
 
 ## Code layout
 

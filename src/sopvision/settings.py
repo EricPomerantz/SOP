@@ -24,7 +24,8 @@ class Settings(BaseSettings):
     decider_timeout: float = 5.0
     # Laya (convaiinnovations/laya), a 421M decision model behind the same wire format; evaluation only so far.
     laya_url: str = "http://laya:8000"
-    laya_model: str = "english"  # english | multilingual | typed-decisions
+    laya_model: str = "english"  # english | multilingual | typed-decisions: SOPs without a checkpoint of their own
+    laya_registry: Path = Path("data/training/models/registry.json")  # per-SOP checkpoints (decide/laya_registry.py)
     laya_max_len: int | None = None  # token budgets; None = the checkpoint's own (english 512 / 192)
     laya_head_max_len: int | None = None
     sop_data_root: Path = Path("/data/server_fan")  # the server_fan (clips) dataset
@@ -37,6 +38,7 @@ class Settings(BaseSettings):
     sops_dir: Path = Path("sops")
     runs_dir: Path = Path("runs")
     scenarios_dir: Path = Path("data/scenarios")
+    jobs_dir: Path = Path("data/jobs")  # background jobs, run by the worker service (sopvision.jobs)
 
     @field_validator("sopvision_rtsp_urls", mode="before")
     @classmethod

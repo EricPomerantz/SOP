@@ -17,12 +17,51 @@ services:
       - ./src:/app/src:ro
       - ./scripts:/app/scripts:ro
       - ./benchmarks:/app/benchmarks  # frozen decision benchmarks (written once by scripts/freeze_benchmark.py)
-      - ./models:/app/models:ro
+      - ./models:/app/models  # writable: the SOP builder imports detectors here
       - ./runs:/app/runs
-      - ./sops:/app/sops:ro
+      - ./sops:/app/sops  # writable: the SOP builder keeps drafts in sops/drafts and publishes into sops/
       - ./data/scenarios:/app/data/scenarios:ro
       - ./data/training:/app/data/training  # fine-tuning captures and datasets (scripts/capture_requests.py)
       - ./datasets:/datasets  # timeline-format datasets: new SOPs' recordings (writable: the dashboard records here)
+      - ./data/jobs:/app/data/jobs  # background jobs: queued here, run by the worker service
+      - ./data/builder:/app/data/builder:ro  # the builder's job results (slot auto-fit, sample frames)
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  # Runs the jobs the dashboard queues (timeline drafts, slot auto-fit, Laya training), one at a time, on the GPU.
+  # Started with the app by ./start.sh; same code and data mounts as sopvision, plus laya-train.
+  worker:
+    build:
+      context: .
+      target: worker
+      additional_contexts:
+        certs: ${CORP_CA_DIR:-./docker/certs}
+    image: sopvision-worker:latest
+    env_file: .env
+    environment:
+      SOP_DATA_ROOT: /data/server_fan
+      DATASETS_DIR: /datasets
+      SOPVISION_IN_CONTAINER: "1"
+      DECISION_MODE: laya  # benchmarks and replays in training jobs ask the Laya service
+      LAYA_URL: http://laya:8000
+    restart: unless-stopped
+    shm_size: 4gb
+    volumes:
+      - ${SOP_DATASET_DIR:-./sop-sample-training-data}:/data:ro
+      - ./src:/app/src:ro
+      - ./scripts:/app/scripts:ro
+      - ./benchmarks:/app/benchmarks
+      - ./models:/app/models:ro
+      - ./runs:/app/runs
+      - ./sops:/app/sops:ro
+      - ./data:/app/data  # jobs, training sets and checkpoints, timeline drafts (data/<dataset dir>/steps)
+      - ./datasets:/datasets
+      - hf_cache:/cache
     deploy:
       resources:
         reservations:

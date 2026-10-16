@@ -55,6 +55,10 @@ class DetectorSpec(_Model):
     weights: Path
     classes: list[str]
     autolabel_prompts: dict[str, str] = {}
+    # What the SOP builder was told each class is, before any slot uses it: a part that fills slots, or a marker the
+    # detector gives an empty slot (auto-fit clusters both into slot positions). Anchor, tools and `hand` have their
+    # own fields; unlisted classes are ignored by the builder.
+    roles: dict[str, Literal["part", "empty"]] = {}
 
 
 class DatasetSpec(_Model):
@@ -98,6 +102,9 @@ class SopConfig(_Model):
     @model_validator(mode="after")
     def _cross_field_rules(self) -> "SopConfig":
         classes = set(self.detector.classes)
+        for cls in self.detector.roles:
+            if cls not in classes:
+                raise ValueError(f"detector: roles name '{cls}', which is not a detector class")
         if self.layout.anchor not in classes:
             raise ValueError(f"layout: anchor '{self.layout.anchor}' is not a detector class")
         for name, slot in self.layout.slots.items():

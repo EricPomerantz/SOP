@@ -78,7 +78,7 @@ def run_eval(settings: Settings, sop: SopConfig, out: Path, env: dict, progress=
     detector = YoloDetector(sop.detector.weights, sop.detector.classes)
 
     async def main():
-        client, shadow = clients_for(settings)
+        client, shadow = clients_for(settings, sop.sop)
         try:
             return await _run_all(settings, sop, detector, client, progress, shadow, out)
         finally:

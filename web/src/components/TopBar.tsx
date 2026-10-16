@@ -14,6 +14,7 @@ export function TopBar({ title, version, source, elapsed, status, running }: Pro
         {source && <span className="muted">· {source}</span>}
       </div>
       <div className="topbar-right">
+        <a className="muted" href="#/sops">SOPs</a>
         <a className="muted" href="#/record">Record</a>
         <a className="muted" href="#/latency">Camera latency</a>
         <span className="timer" aria-label="Run time">{clock(elapsed)}</span>

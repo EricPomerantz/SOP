@@ -62,5 +62,21 @@ RUN uv sync --frozen --no-dev --group training --system-certs --trusted-host dow
 ENTRYPOINT ["python"]
 CMD ["--help"]
 
+# The worker service (sopvision.jobs.worker): the app plus laya-train, for jobs queued from the dashboard. Laya gets
+# its own environment so its pins can't move the app's; corporate root CAs as in docker/laya.Dockerfile (CORP_CA_DIR).
+FROM runtime AS worker
+COPY --from=certs . /usr/local/share/ca-certificates/
+RUN update-ca-certificates
+ENV SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt \
+    REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt \
+    HF_HOME=/cache/huggingface \
+    USE_TF=0
+RUN uv venv /opt/laya --python python3.12 \
+    && uv pip install --python /opt/laya/bin/python --system-certs --index-url https://download.pytorch.org/whl/cu128 torch==2.11.0 \
+    && uv pip install --python /opt/laya/bin/python --system-certs "laya[serve]==0.3.28" \
+    && ln -s /opt/laya/bin/laya-train /usr/local/bin/laya-train
+ENTRYPOINT ["python", "-m", "sopvision.jobs.worker"]
+CMD []
+
 # Default target: the runtime image.
 FROM runtime

@@ -55,3 +55,11 @@ def test_rows_use_the_wire_questions():
     r = bts.row(record(20.0), {"current_step": "fan_2"}, "in_order", "train", 0)
     assert r["questions"]["current_step"]["type"] == "choice" and r["questions"]["anomaly"]["type"] == "noul"
     assert r["expected"] == {"current_step": "fan_2"} and r["split"] == "train"
+
+
+def test_off_sop_stretches_can_be_labelled_off_sop_apart_from_idle():
+    raw = [("idle", 0.0, 2.5), ("off_sop", 2.5, 5.0), ("fan_1", 5.0, 15.0)]
+    idle = ("idle", "off_sop")
+    assert bts.labels(record(1.0, gt=idle), SEGS, raw)["current_step"] == "idle"
+    assert bts.labels(record(3.0, gt=idle), SEGS, raw)["current_step"] == "off_sop"
+    assert bts.labels(record(3.0, gt=idle), SEGS)["current_step"] == "idle"  # without the raw rows: as before

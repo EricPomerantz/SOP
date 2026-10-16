@@ -9,7 +9,8 @@ correct; then install the corrected files into the dataset.
     docker compose run --rm -v ./data/lug_bolts:/app/data/lug_bolts --entrypoint python sopvision \
         scripts/draft_steps.py install --sop sops/lug_bolts.yaml
 
-How a draft is cut: the tracker's completion times end the steps (a bolt seen seated, a torque result attributed),
+The dashboard's SOP builder does the same per run (sopvision.builder.timelines, steps.draft.csv in the run folder)
+and has a page to correct it; this script is the file-based way. How a draft is cut: the tracker's completion times end the steps (a bolt seen seated, a torque result attributed),
 and each step runs from the previous completion to its own, so fetching the next bolt counts as working on it (the
 server_fan clips' convention). Stretches of IDLE_GAP seconds or more with no hand or tool in view become `idle`, as
 does everything after the last completion. Steps the tracker never completed, and deviations it can't see (a bolt
@@ -18,91 +19,24 @@ run's alerts next to its draft.
 """
 
 import argparse
-import asyncio
 import csv
 import os
 import shutil
 import sys
-from dataclasses import dataclass
 from pathlib import Path
 
+from sopvision.builder import timelines
+from sopvision.builder.timelines import IDLE_GAP, Draft, cut  # noqa: F401 — the cutting lives with the builder
 from sopvision.config import SopConfig, load_sop
 from sopvision.perception.detector import YoloDetector
-from sopvision.pipeline import RunCore
 from sopvision.recordings import Recording, dataset_root, load_recordings
-from sopvision.scene.builder import SceneBuilder
 from sopvision.settings import Settings
-from sopvision.sop.torque import read_torque_log
-from sopvision.sources.file import FileSource
 
-IDLE_GAP = 5.0  # seconds with nobody at the wheel that count as idle
-
-
-@dataclass(frozen=True)
-class Draft:
-    rows: list[tuple[str, float, float]]  # step_id, start_s, end_s
-    alerts: list[str]
-    not_done: list[str]
-
-
-def cut(done: list[tuple[float, str]], present: list[tuple[float, bool]], duration: float) -> list[tuple[str, float, float]]:
-    """Contiguous segments ending at each completion; long stretches with nobody present split out as idle."""
-    rows, start = [], 0.0
-    for t, step in sorted(done) + [(duration, "idle")]:
-        idle = _idle_spans(present, start, t)
-        for a, b in idle:
-            if a > start:
-                rows.append((step, start, a))
-            rows.append(("idle", a, b))
-            start = b
-        if t > start:
-            rows.append((step, start, t))
-        start = t
-    merged: list[tuple[str, float, float]] = []
-    for step, a, b in rows:  # back-to-back idle pieces become one
-        if merged and merged[-1][0] == step == "idle":
-            merged[-1] = (step, merged[-1][1], b)
-        else:
-            merged.append((step, a, b))
-    return [(s, round(a, 2), round(b, 2)) for s, a, b in merged if b - a > 0.01]
-
-
-def _idle_spans(present: list[tuple[float, bool]], start: float, end: float) -> list[tuple[float, float]]:
-    spans, since = [], None
-    for t, here in present:
-        if t < start or t > end:
-            continue
-        if not here and since is None:
-            since = t
-        elif here and since is not None:
-            if t - since >= IDLE_GAP:
-                spans.append((since, t))
-            since = None
-    if since is not None and end - since >= IDLE_GAP:
-        spans.append((since, end))
-    return spans
 
 
 def replay(sop: SopConfig, rec: Recording, detector: YoloDetector) -> Draft:
-    """The tracker's view of a recording: no decision model, completions from evidence and torque results alone."""
-    detector.reset()
-    core = RunCore(sop, "draft", rec.source_id, None)
-    builder = SceneBuilder(sop)
-    core.mark_torqued = builder.mark_torqued
-    if rec.torque_log is not None and core.torque is not None:
-        for result in read_torque_log(rec.torque_log):
-            core.on_torque(result)
-    present, t = [], 0.0
-    for frame in FileSource(rec.video, mode="lockstep").frames():
-        scene, events = builder.update(frame.t, detector.detect(frame))
-        core.on_scene(scene, events)
-        present.append((frame.t, bool(scene.hands) or bool(scene.tools)))
-        t = frame.t
-    core.finish()
-    steps = core.tracker.steps()
-    done = [(s.done_t, s.id) for s in steps if s.status == "done" and s.done_t is not None]
-    alerts = [f"{a.t:.1f}s {a.level} {a.kind}: {a.message}" for a in core.alerts if a.level in ("warning", "violation")]
-    return Draft(cut(done, present, t), alerts, [s.id for s in steps if s.status != "done"])
+    """The tracker's view of a recording (sopvision.builder.timelines.replay)."""
+    return timelines.replay(sop, rec.video, rec.torque_log, rec.source_id, detector)
 
 
 def write_csv(path: Path, rows: list[tuple[str, float, float]]) -> None:

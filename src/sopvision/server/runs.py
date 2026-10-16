@@ -81,15 +81,18 @@ def default_run_factory(settings: Settings) -> Callable:
     from sopvision.sources.latency import camera_delay
     from sopvision.sources.registry import open_source
 
-    detectors: dict[str, YoloDetector] = {}
+    detectors: dict[tuple[str, str], YoloDetector] = {}  # (SOP, weights): a republished SOP gets its new detector
 
     def factory(ctx: RunContext, spec: SourceSpec):
         sop = ctx.sop
-        if sop.sop not in detectors:
-            detectors[sop.sop] = YoloDetector(sop.detector.weights, sop.detector.classes)
-        detector = detectors[sop.sop]
+        key = (sop.sop, str(sop.detector.weights))
+        if key not in detectors:
+            for old in [k for k in detectors if k[0] == sop.sop]:
+                del detectors[old]
+            detectors[key] = YoloDetector(sop.detector.weights, sop.detector.classes)
+        detector = detectors[key]
         detector.reset()
-        client, shadow = clients_for(settings)
+        client, shadow = clients_for(settings, sop.sop)
         return LiveRun(ctx, open_source(spec, settings), detector, client, shadow, camera_delay=camera_delay(spec, settings))
 
     return factory
@@ -105,6 +108,17 @@ class RunManager:
         self.spec: SourceSpec | None = None
         self.last_decision: dict | None = None
         self.recording = None  # RecordingSession while recording (server/recording.py)
+
+    def reload_sops(self) -> list[str]:
+        """Re-read sops/ (after the builder published one), keeping the old set if any file is broken."""
+        if self._active() or self.recording is not None:
+            raise RunConflictError("Stop the current run or recording first.")
+        sops = list_sops(self.settings.sops_dir)
+        for sop in sops:
+            if not Path(sop.detector.weights).exists():
+                raise ConfigError(f"Weights not found: {sop.detector.weights} (SOP {sop.sop})")
+        self.sops = {s.sop: s for s in sops}
+        return list(self.sops)
 
     def broadcast(self, msg: dict) -> None:
         if msg.get("type") == "decision":
@@ -174,7 +188,11 @@ class RunManager:
             if sop.dataset.format == "timeline":
                 out.append({"file": str(path), "id": sop.sop, "name": sop.display_name,
                             "dataset": str(dataset_root(sop, self.settings)), "torque": bool(sop.layout.tools)})
-        return out, errors
+        # An SOP being edited has a draft and a published file: list it once, as the draft (the newer version).
+        by_id: dict[str, dict] = {}
+        for entry in out:
+            by_id[entry["id"]] = entry  # drafts come after published files
+        return list(by_id.values()), errors
 
     def start_recording(self, sop_file: str, source_id: str, split: str, name: str | None, fps: float = 25.0) -> dict:
         from sopvision.config import load_sop

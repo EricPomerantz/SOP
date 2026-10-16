@@ -27,9 +27,9 @@ from sopvision.sop.torque import read_torque_log
 from sopvision.sources.file import FileSource
 
 
-async def replay(settings: Settings, sop, recordings) -> list[dict]:
+async def replay(settings: Settings, sop, recordings, laya_model: str | None = None) -> list[dict]:
     detector = YoloDetector(sop.detector.weights, sop.detector.classes)
-    client, _ = clients_for(settings)
+    client, _ = clients_for(settings, sop.sop, laya_model)
     out = []
     try:
         for rec in recordings:
@@ -71,12 +71,14 @@ def main() -> int:
     ap.add_argument("--split", default="test", choices=["train", "val", "test", "all"])
     ap.add_argument("--recording", action="append", default=[], help="only these recording ids (repeatable)")
     ap.add_argument("--out", type=Path, default=None, help="also write the results as JSON")
+    ap.add_argument("--laya-model", default=None, help="the Laya model to ask (default: the SOP's checkpoint in the "
+                                                       "registry, else LAYA_MODEL)")
     args = ap.parse_args()
     settings, sop = Settings(), load_sop(args.sop)
     recs = [r for r in load_recordings(sop, settings) if r.valid and (args.split == "all" or r.split == args.split)
             and (not args.recording or r.id in args.recording)]
     print(f"{sop.sop}: {len(recs)} recordings, decisions from {settings.decision_mode}", flush=True)
-    results = asyncio.run(replay(settings, sop, recs))
+    results = asyncio.run(replay(settings, sop, recs, args.laya_model))
     if args.out:
         args.out.parent.mkdir(parents=True, exist_ok=True)
         args.out.write_text(json.dumps({"sop": sop.sop, "decision_mode": settings.decision_mode, "runs": results},

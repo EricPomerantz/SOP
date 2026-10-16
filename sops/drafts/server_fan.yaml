@@ -1,0 +1,157 @@
+sop: server_fan_install
+name: Server fan install
+version: 1
+description: Install six fans, two power supplies and the cover on a 1U server.
+detector:
+  weights: models/server_fan/best.pt
+  classes:
+  - chassis
+  - fan
+  - fan_bay_empty
+  - psu
+  - psu_bay_empty
+  - cover
+  - hand
+  autolabel_prompts:
+    chassis: 1U server chassis seen from above
+    fan: black server fan module
+    fan_bay_empty: empty fan slot
+    psu: power supply unit
+    psu_bay_empty: empty power supply bay
+    cover: metal server top cover
+    hand: hand
+  roles:
+    fan: part
+    fan_bay_empty: empty
+    psu: part
+    psu_bay_empty: empty
+    cover: part
+layout:
+  anchor: chassis
+  match_radius: 0.08
+  slots:
+    fan_bay_1:
+      at:
+      - 0.55
+      - 0.851
+      filled_by: fan
+      empty_as: fan_bay_empty
+    fan_bay_2:
+      at:
+      - 0.548
+      - 0.743
+      filled_by: fan
+      empty_as: fan_bay_empty
+    fan_bay_3:
+      at:
+      - 0.549
+      - 0.641
+      filled_by: fan
+      empty_as: fan_bay_empty
+    fan_bay_4:
+      at:
+      - 0.553
+      - 0.363
+      filled_by: fan
+      empty_as: fan_bay_empty
+    fan_bay_5:
+      at:
+      - 0.552
+      - 0.257
+      filled_by: fan
+      empty_as: fan_bay_empty
+    fan_bay_6:
+      at:
+      - 0.551
+      - 0.158
+      filled_by: fan
+      empty_as: fan_bay_empty
+    psu_bay_1:
+      at:
+      - 0.295
+      - 0.142
+      filled_by: psu
+      empty_as: psu_bay_empty
+    psu_bay_2:
+      at:
+      - 0.299
+      - 0.856
+      filled_by: psu
+      empty_as: psu_bay_empty
+    cover:
+      at:
+      - 0.401
+      - 0.503
+      filled_by: cover
+      match_radius: 0.25
+  tools: []
+steps:
+- id: fan_1
+  label: Fan 1
+  text: Install the first fan by connecting the connector, then pressing the fan in place.
+  evidence:
+    fan_bay_1: installed
+- id: fan_2
+  label: Fan 2
+  text: Install the second fan by connecting the connector, then pressing the fan in place.
+  evidence:
+    fan_bay_2: installed
+- id: fan_3
+  label: Fan 3
+  text: Install the third fan by connecting the connector, then pressing the fan in place.
+  evidence:
+    fan_bay_3: installed
+- id: fan_4
+  label: Fan 4
+  text: Install the fourth fan by connecting the connector, then pressing the fan in place.
+  evidence:
+    fan_bay_4: installed
+- id: fan_5
+  label: Fan 5
+  text: Install the fifth fan by connecting the connector, then pressing the fan in place.
+  evidence:
+    fan_bay_5: installed
+- id: fan_6
+  label: Fan 6
+  text: Install the sixth fan by connecting the connector, then pressing the fan in place.
+  evidence:
+    fan_bay_6: installed
+- id: psu_1
+  label: PSU 1
+  text: Install the first power supply by placing it in its compartment, then firmly pressing it in place until the latch
+    clicks.
+  evidence:
+    psu_bay_1: installed
+- id: psu_2
+  label: PSU 2
+  text: Install the second power supply by placing it in its compartment, then firmly pressing it in place until the latch
+    clicks.
+  evidence:
+    psu_bay_2: installed
+- id: cover
+  label: Cover
+  text: Place the cover on top of the server and press the black latch to lock it.
+  evidence:
+    cover: installed
+  hands_off: true
+order: strict
+off_sop: Any action that is not one of the steps above.
+idle: No one is working on the server
+decisions:
+  accept_confidence: 0.8
+  hold_seconds: 1
+  evidence_only_after: 1
+  hands_off_seconds: 0.5
+dataset:
+  format: clips
+  actions:
+    '1': fan_1
+    '2': fan_2
+    '3': fan_3
+    '4': fan_4
+    '5': fan_5
+    '6': fan_6
+    '7': psu_1
+    '8': psu_2
+    '9': cover
+    '10': off_sop
