@@ -1,59 +1,94 @@
 import { useEffect, useState } from "react";
-import type { BuilderApi, Job, SopView } from "../../builderApi";
+import { Box, Button, Table, TableBody, TableCell, TableHead, TableRow, Typography } from "@mui/material";
+import { Timeline as TimelineIcon } from "@mui/icons-material";
+import type { BuilderApi, Job, RunRow, SopView } from "../../builderApi";
+import { FormBanner } from "../../ui/dialogKit";
+import { useGlobalAlert } from "../../ui/GlobalAlertProvider";
+import { EmptyNote, HealthLabel, Panel, plantColor } from "../../ui/kit";
+import { plantBtn } from "../../ui/plantTheme";
 import { JobPanel } from "./JobPanel";
 
-type Props = { api: BuilderApi; view: SopView; onReload: () => void };
+type Props = { api: BuilderApi; view: SopView; onReload: () => void; flush?: () => Promise<void> };
 
-/** Step timelines per recorded run: the tracker drafts them, a person corrects each on the timeline page. */
-export function TimelinesStage({ api, view, onReload }: Props) {
+const status = (r: RunRow) =>
+  r.steps ? <HealthLabel health="ok" label="Saved" /> : r.draft ? <HealthLabel health="pending" label="Draft ready to review" /> : <HealthLabel health="idle" label="Not started" strong={false} />;
+
+/** Step timelines per recorded run: the tracker drafts them, a person checks and corrects each on the run's page. */
+export function TimelinesStage({ api, view, onReload, flush }: Props) {
+  const alert = useGlobalAlert();
   const [jobId, setJobId] = useState<string | null>(null);
   const [error, setError] = useState("");
   const runs = view.status.runs ?? [];
+  const missing = runs.filter((r) => !r.steps).map((r) => r.id);
+  const shared = (view.data.dataset?.dir ?? view.id) !== view.id;
   useEffect(() => {
     api.jobs(view.file).then((jobs) => {
-      const running = jobs.find((j) => j.kind === "draft_timelines" && !["done", "failed", "cancelled"].includes(j.state));
+      const running = jobs.find((j) => ["draft_timelines", "previews"].includes(j.kind) && !["done", "failed", "cancelled"].includes(j.state));
       if (running) setJobId(running.id);
-    }).catch(() => {});
-  }, [api, view.file]);
-  const draft = async () => {
+    }).catch((e) => alert.error(`Couldn't check for a running job: ${e instanceof Error ? e.message : String(e)}`));
+  }, [api, view.file]); // eslint-disable-line react-hooks/exhaustive-deps
+  const start = async (kind: "draft_timelines" | "previews", only?: string[]) => {
     setError("");
-    try { setJobId((await api.startJob("draft_timelines", { sop_file: view.file })).id); }
-    catch (e) { setError(e instanceof Error ? e.message : String(e)); }
-  };
-  const prepare = async () => {
-    setError("");
-    try { setJobId((await api.startJob("previews", { sop_file: view.file })).id); }
-    catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+    try {
+      await flush?.();
+      setJobId((await api.startJob(kind, only ? { sop_file: view.file, runs: only } : { sop_file: view.file })).id);
+    } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
   };
   const finished = (job: Job) => { if (job.state === "done") onReload(); };
+  const noSteps = !view.status.steps;
+
   return (
-    <div className="stage">
-      <p className="muted">
-        Every run needs a step timeline: which step was under way when, idle stretches, and off-SOP actions. These
-        are the decision model's labels. "Draft timelines" replays each run through the detector and tracker and
-        writes a draft (and a browser-playable copy of the video); open each run to correct it and save. To label
-        from scratch instead, "Prepare videos only" and open a run.
-        {view.draft && " Save the draft SOP first: drafting uses its steps."}
-      </p>
-      {error && <p className="error" role="alert">{error}</p>}
-      <div className="row">
-        <button onClick={draft} disabled={runs.length === 0 || !view.status.steps}>Draft timelines</button>
-        <button onClick={prepare} disabled={runs.length === 0}>Prepare videos only</button>
-        <span className="muted">{runs.filter((r) => r.steps).length} of {runs.length} runs have a saved timeline</span>
-      </div>
+    <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
+      {error && <FormBanner tone="bad" onClose={() => setError("")}>{error}</FormBanner>}
+      {shared && <FormBanner tone="warn">These recordings are shared with another SOP: a timeline saved here changes its labels too.</FormBanner>}
+      <Panel title="Draft timelines with the tracker" icon={<TimelineIcon />}
+        subtitle="Replays runs through the detector and tracker and writes a draft timeline to check on each run's page">
+        <Box sx={{ display: "flex", gap: 1, flexWrap: "wrap", alignItems: "center" }}>
+          {missing.length > 0 && missing.length < runs.length && (
+            <Button variant="contained" disableElevation sx={plantBtn} disabled={noSteps} onClick={() => void start("draft_timelines", missing)}>
+              Draft the {missing.length} runs without a timeline
+            </Button>
+          )}
+          <Button variant={missing.length > 0 && missing.length < runs.length ? "outlined" : "contained"} disableElevation sx={plantBtn}
+            disabled={runs.length === 0 || noSteps} onClick={() => void start("draft_timelines")}>Draft all runs</Button>
+          <Button variant="text" sx={plantBtn} disabled={runs.length === 0} onClick={() => void start("previews")}>Prepare videos only</Button>
+          <Typography sx={{ fontSize: 13, color: plantColor.ink, ml: "auto", fontWeight: 600 }}>
+            {runs.filter((r) => r.steps).length} of {runs.length} runs have a saved timeline
+          </Typography>
+        </Box>
+        <Typography sx={{ fontSize: 12.5, color: plantColor.muted, mt: 1 }}>
+          {noSteps ? "Add the steps first: the draft is labelled with them. " : ""}
+          Each run without a browser-playable copy gets one made too, which takes a few minutes per run; draft one run at a time from the table to start quickly.
+          To label from scratch instead, prepare the videos and open a run.
+        </Typography>
+      </Panel>
       <JobPanel api={api} jobId={jobId} onFinished={finished} />
-      <table className="grid-table" aria-label="Timelines">
-        <thead><tr><th>Run</th><th>Split</th><th>Timeline</th><th></th></tr></thead>
-        <tbody>
-          {runs.map((r) => (
-            <tr key={r.id}>
-              <td className="mono">{r.id}</td><td>{r.split ?? "—"}</td>
-              <td>{r.steps ? <span className="step-done">✓ saved</span> : r.draft ? "draft to review" : "—"}</td>
-              <td><a href={`#/sops/${view.id}/runs/${encodeURIComponent(r.id)}`}>{r.steps ? "Open" : "Label"}</a></td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+      <Panel title="Runs" flush={runs.length > 0}>
+        {runs.length === 0 ? (
+          <EmptyNote icon={<TimelineIcon />} title="No recordings yet">Record runs in the Recordings stage first.</EmptyNote>
+        ) : (
+          <Table size="small" aria-label="Timelines">
+            <TableHead><TableRow><TableCell>Run</TableCell><TableCell>Split</TableCell><TableCell>Timeline</TableCell><TableCell /></TableRow></TableHead>
+            <TableBody>
+              {runs.map((r) => {
+                const verb = r.steps ? "Open" : r.draft ? "Review" : "Label";
+                return (
+                  <TableRow key={r.id}>
+                    <TableCell sx={{ fontFamily: "ui-monospace, Menlo, monospace", fontSize: 12.5 }}>{r.id}</TableCell>
+                    <TableCell>{r.split ?? "—"}</TableCell>
+                    <TableCell>{status(r)}</TableCell>
+                    <TableCell align="right" sx={{ whiteSpace: "nowrap" }}>
+                      <Button size="small" variant="text" sx={plantBtn} disabled={noSteps} aria-label={`Draft ${r.id}`} onClick={() => void start("draft_timelines", [r.id])}>Draft</Button>
+                      <Button size="small" variant="outlined" sx={{ ...plantBtn, ml: 0.5 }} component="a" aria-label={`${verb} ${r.id}`}
+                        href={`#/sops/${view.id}/runs/${encodeURIComponent(r.id)}`}>{verb}</Button>
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        )}
+      </Panel>
+    </Box>
   );
 }

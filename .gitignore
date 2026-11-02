@@ -30,3 +30,4 @@ docker/certs/*
 !docker/certs/.gitkeep
 # Recordings for timeline-format SOP datasets (large videos)
 datasets/
+web/e2e/test-results/

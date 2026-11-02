@@ -3,21 +3,28 @@ name: Demo Wheel Defects
 version: 1
 description: checking wheels for defects
 detector:
-  weights: models/wheel_defect/detector-20261016-153104.pt
+  weights: models/lug_bolts/best.pt
   classes:
-  - Defect
-  - Good Bolt
-  - Wrong Bolt
-  - Missing Bolt
+  - hub
+  - hole_empty
+  - lug_bolt_blue
+  - lug_bolt_green
+  - lug_bolt_red
+  - lug_bolt_gold
+  - torque_wrench
+  - hand
   roles:
-    Good Bolt: part
-    Missing Bolt: empty
-    Wrong Bolt: part
+    hole_empty: empty
+    lug_bolt_blue: part
+    lug_bolt_green: part
+    lug_bolt_red: part
+    lug_bolt_gold: part
 layout:
-  anchor: Defect
+  anchor: hub
   match_radius: 0.1
   slots: {}
-  tools: []
+  tools:
+  - torque_wrench
 steps: []
 order: strict
 off_sop: Any action that is not one of the steps above.

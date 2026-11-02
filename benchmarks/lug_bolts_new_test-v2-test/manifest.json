@@ -1,0 +1,17 @@
+{
+  "requests": 907,
+  "labelled_current_step": 741,
+  "sha256": {
+    "requests.jsonl": "2accb1a5912cfd0e97518e8e97b1e3b0d2d0406f5663f450e02c07b9c2b1b9c4"
+  },
+  "sources": {
+    "runs/capture-lug_bolts_new_test-v2-test/test-dev1-counterclockwise.jsonl": "69373b8ad235235b1fb869701b311efd5de70c5fc71ca759794139b6c01cdc8d",
+    "runs/capture-lug_bolts_new_test-v2-test/test-dev2-early-and-repeat.jsonl": "00691261672a25f0f1edb50c1dc779831d4cd1f8d109b1652d90313561260d9b",
+    "runs/capture-lug_bolts_new_test-v2-test/test-dev3-removed-not-reached.jsonl": "61f4b23e264e3a6aa892e6baf969ed91573be362903edf38227d6b9806c1c0dd",
+    "runs/capture-lug_bolts_new_test-v2-test/test-dev4-idle-offsop.jsonl": "cce361310634f1ab056cce0131fcf28bdc2ba14dfaa98b06f73bc07ce9290982",
+    "runs/capture-lug_bolts_new_test-v2-test/test-testcorrect1.jsonl": "2133deb037186fef9ceb0386e487551f608c645b3a0428a8c80a6f0f4d2a45a0",
+    "runs/capture-lug_bolts_new_test-v2-test/test-testcorrect2.jsonl": "7e0a186b37d19e684e6cb7d2c65982ada6898237ceca4c5dc1f095b5fb43752f",
+    "runs/capture-lug_bolts_new_test-v2-test/test-testcorrect3.jsonl": "360e8b38a0c8e5322ef50edb52cf3df441a5d5082e30edebc33ac414bb6f362a"
+  },
+  "note": "Frozen evaluation set. Never train on it, never rewrite it; runs 12-13 are excluded from training data."
+}

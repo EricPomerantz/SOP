@@ -27,6 +27,19 @@ function api(): Api {
   };
 }
 
+test("record: opened from the builder, it links back and says what to do with the run next", async () => {
+  const a = api();
+  render(<RecordPage api={a} poll={60_000} back="#/sops/lug_bolts_torque/recordings" />);
+  await screen.findByText("Wheel lug bolts");
+  expect(screen.getByRole("link", { name: "Back to the SOP" })).toHaveAttribute("href", "#/sops/lug_bolts_torque/recordings");
+  fireEvent.click(screen.getByRole("button", { name: "Start recording" }));
+  await screen.findByLabelText("Recording");
+  fireEvent.click(screen.getByRole("button", { name: "Stop and save" }));
+  await screen.findByText(/Saved r01 \(train\)/);
+  expect(screen.getByRole("link", { name: /label its timeline/ })).toHaveAttribute("href", "#/sops/lug_bolts_torque/timelines");
+  expect(screen.queryByText(/steps.csv/)).toBeNull();
+});
+
 test("record: start, press torque, stop and save", async () => {
   const a = api();
   render(<RecordPage api={a} poll={60_000} />);

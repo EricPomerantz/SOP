@@ -1,9 +1,17 @@
 import { useEffect, useRef, useState, type MouseEvent } from "react";
+import { Box, Button, TextField, Typography } from "@mui/material";
+import { AddLocationAlt as AddIcon, AutoFixHigh as SuggestIcon, PlaceOutlined as SlotsIcon } from "@mui/icons-material";
 import type { AutofitResult, BuilderApi, Job, SlotData, SopData, SopView } from "../../builderApi";
+import { ConfirmDialog } from "../../ui/ConfirmDialog";
+import { fieldSx } from "../../ui/dialogStyles";
+import { FormBanner, FormField } from "../../ui/dialogKit";
+import { useGlobalAlert } from "../../ui/GlobalAlertProvider";
+import { EmptyNote, Panel, plantColor } from "../../ui/kit";
+import { plantBtn } from "../../ui/plantTheme";
 import { JobPanel } from "./JobPanel";
 import { addSlot, SlotTable } from "./SlotTable";
 
-type Props = { api: BuilderApi; view: SopView; data: SopData; onChange: (d: SopData) => void; confirm?: (m: string) => boolean };
+type Props = { api: BuilderApi; view: SopView; data: SopData; onChange: (d: SopData) => void; flush?: () => Promise<void> };
 type Sample = AutofitResult["samples"][string];
 
 const COLOURS = ["#2f7cf6", "#e5484d", "#30a46c", "#f5a524", "#8e4ec6", "#12a594", "#d6409f", "#978365"];
@@ -53,7 +61,8 @@ function FrameView({ src, sample, data, fitResult, selected, onSelect, onMove, o
 }
 
 /** Slot positions on the anchor's box: suggested from the recordings, adjusted on a frame, checked on the others. */
-export function LayoutStage({ api, view, data, onChange, confirm = (m) => window.confirm(m) }: Props) {
+export function LayoutStage({ api, view, data, onChange, flush }: Props) {
+  const alert = useGlobalAlert();
   const ro = !view.draft;
   const layout = data.layout;
   const [fitResult, setFitResult] = useState<AutofitResult | null>(null);
@@ -62,33 +71,40 @@ export function LayoutStage({ api, view, data, onChange, confirm = (m) => window
   const [run, setRun] = useState("");
   const [selected, setSelected] = useState<string | undefined>();
   const [adding, setAdding] = useState(false);
+  const [replacing, setReplacing] = useState(false);
   const [error, setError] = useState("");
+  const say = (what: string) => (e: unknown) => alert.error(`${what}: ${e instanceof Error ? e.message : String(e)}`);
 
-  const load = () => api.autofit(view.id).then((r) => { setFitResult(r); setRun((cur) => cur || Object.keys(r?.samples ?? {})[0] || ""); }).catch(() => {});
+  const load = () => api.autofit(view.id)
+    .then((r) => { setFitResult(r); setRun((cur) => cur || Object.keys(r?.samples ?? {})[0] || ""); })
+    .catch(say("Couldn't load the last slot suggestion"));
   useEffect(() => {
     load();
     api.jobs(view.file).then((jobs) => {
       const running = jobs.find((j) => j.kind === "autofit" && !["done", "failed", "cancelled"].includes(j.state));
       if (running) setJobId(running.id);
-    }).catch(() => {});
+    }).catch(say("Couldn't check for a running job"));
   }, [api, view.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const set = (patch: Partial<SopData["layout"]>) => onChange({ ...data, layout: { ...layout, ...patch } });
+  const runs = view.status.runs ?? [];
+  const suggestBlocker = !layout.anchor ? "Pick the anchor class in the Detector stage first" : runs.length === 0 ? "Record some runs first" : "";
   const suggest = async () => {
     setError("");
-    try { setJobId((await api.startJob("autofit", { sop_file: view.file, threshold })).id); }
+    try { await flush?.(); setJobId((await api.startJob("autofit", { sop_file: view.file, threshold })).id); }
     catch (e) { setError(e instanceof Error ? e.message : String(e)); }
   };
   const apply = () => {
     if (!fitResult) return;
-    if (Object.keys(layout.slots ?? {}).length && !confirm("Replace the current slots with the suggested ones?")) return;
     const slots: Record<string, SlotData> = {};
     for (const c of fitResult.slots) {
       slots[c.name] = { at: c.at, filled_by: c.filled_by.length === 1 ? c.filled_by[0] : c.filled_by, empty_as: c.empty_as,
         match_radius: Math.abs(c.radius - fitResult.match_radius) > 0.01 ? c.radius : null };
     }
     onChange({ ...data, layout: { ...layout, slots, match_radius: fitResult.match_radius } });
+    setReplacing(false);
   };
+  const askApply = () => (Object.keys(layout.slots ?? {}).length ? setReplacing(true) : apply());
   const move = (name: string, at: [number, number]) => {
     const s = layout.slots[name];
     set({ slots: { ...layout.slots, [name]: { ...s, at: [Math.min(1, Math.max(0, at[0])), Math.min(1, Math.max(0, at[1]))] } } });
@@ -104,60 +120,84 @@ export function LayoutStage({ api, view, data, onChange, confirm = (m) => window
   const sample = samples[run];
 
   return (
-    <div className="stage">
-      <p className="muted">
-        Slot positions are fractions of the anchor's box (0-1 across and down), so they move with it. "Suggest slots"
-        runs the detector over the recordings and clusters where parts and empty-slot markers sit; drag the rings to
-        adjust, and check them on the other runs' frames below. The ring is the match radius.
-      </p>
-      {error && <p className="error" role="alert">{error}</p>}
-      <div className="row">
-        <button disabled={ro || (view.status.runs ?? []).length === 0 || !layout.anchor} onClick={suggest}>Suggest slots</button>
-        <label>Cluster distance <input type="number" step="0.01" min="0.01" max="0.5" value={threshold}
-          onChange={(e) => setThreshold(Number(e.target.value))} /></label>
-        {fitResult && <button disabled={ro || fitResult.slots.length === 0} onClick={apply}>Use the {fitResult.slots.length} suggested slots</button>}
-        <button disabled={ro} className={adding ? "tab-on" : undefined} onClick={() => (sample ? setAdding(!adding) : onChange(addSlot(data).data))}>
-          {adding ? "Click the frame…" : "Add slot"}
-        </button>
-      </div>
-      {!layout.anchor && <p className="muted">Pick the anchor class in the detector stage first.</p>}
+    <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
+      {error && <FormBanner tone="bad" onClose={() => setError("")}>{error}</FormBanner>}
+      <Panel title="Suggest slots from the recordings" icon={<SuggestIcon />}
+        subtitle="Runs the detector over the recordings and finds where parts and empty-slot markers sit on the anchor">
+        <Box sx={{ display: "flex", gap: 1, flexWrap: "wrap", alignItems: "center" }}>
+          <Button variant="contained" disableElevation sx={plantBtn} startIcon={<SuggestIcon />} disabled={ro || !!suggestBlocker} onClick={() => void suggest()}>Suggest slots</Button>
+          {fitResult && <Button variant="outlined" sx={plantBtn} disabled={ro || fitResult.slots.length === 0} onClick={askApply}>Use the {fitResult.slots.length} suggested slots</Button>}
+          <Button variant={adding ? "contained" : "outlined"} disableElevation sx={plantBtn} startIcon={<AddIcon />} disabled={ro}
+            onClick={() => (sample ? setAdding(!adding) : onChange(addSlot(data).data))}>
+            {adding ? "Click the frame…" : "Add slot"}
+          </Button>
+          {suggestBlocker && <Typography sx={{ fontSize: 12.5, color: plantColor.muted }}>{suggestBlocker}.</Typography>}
+        </Box>
+        {fitResult && (
+          <Typography sx={{ fontSize: 12.5, color: plantColor.muted, mt: 1 }}>
+            Last suggestion: {fitResult.slots.length} slots from {fitResult.frames_used} frames
+            {fitResult.frames_dropped ? ` (${fitResult.frames_dropped} left out: the anchor looked an unusual size)` : ""}.
+          </Typography>
+        )}
+        {fitResult?.warnings.map((w) => <Box key={w} sx={{ mt: 1 }}><FormBanner tone="warn">{w}</FormBanner></Box>)}
+        <Box component="details" sx={{ mt: 1, fontSize: 12.5, color: plantColor.muted }}>
+          <summary style={{ cursor: "pointer" }}>Advanced</summary>
+          <Box sx={{ mt: 1, maxWidth: 360 }}>
+            <FormField label="Cluster distance (anchor widths)" htmlFor="cluster-distance">
+              <TextField id="cluster-distance" type="number" size="small" value={threshold} sx={fieldSx}
+                slotProps={{ htmlInput: { step: 0.01, min: 0.01, max: 0.5 } }} onChange={(e) => setThreshold(Number(e.target.value))}
+                helperText="Detections closer than this are one slot. Smaller splits close slots apart." />
+            </FormField>
+          </Box>
+        </Box>
+      </Panel>
       <JobPanel api={api} jobId={jobId} onFinished={finished} />
-      {fitResult && (
-        <p className="muted">
-          Last suggestion: {fitResult.slots.length} slots from {fitResult.frames_used} frames
-          {fitResult.frames_dropped ? ` (${fitResult.frames_dropped} dropped: anchor box an unusual size)` : ""}.
-          {fitResult.slots.map((c) => ` ${c.name} ±${c.spread.toFixed(3)}`).join(",")}
-        </p>
-      )}
-      {fitResult?.warnings.map((w) => <p key={w} className="pill-warn warn-line">{w}</p>)}
-      {sample && (
-        <div className="layout-editor">
-          <FrameView src={api.frameUrl(view.id, run)} sample={sample} data={data} fitResult={fitResult} selected={selected}
-            onSelect={setSelected} onMove={ro ? undefined : move} onAdd={adding && !ro ? add : undefined} />
-          <div className="frame-strip" aria-label="Other runs">
-            {Object.entries(samples).map(([r, s]) => (
-              <button key={r} className={`frame-pick ${r === run ? "tab-on" : ""}`} onClick={() => setRun(r)} aria-label={`Show ${r}`}>
-                <FrameView src={api.frameUrl(view.id, r)} sample={s} data={data} small />
-                <span className="mono">{r}</span>
-              </button>
-            ))}
+      <Panel title="Slots on a recorded frame" icon={<SlotsIcon />} subtitle="Drag a ring to move its slot; check it on the other runs at the right. The ring is the slot's radius.">
+        {sample ? (
+          <div className="layout-editor">
+            <FrameView src={api.frameUrl(view.id, run)} sample={sample} data={data} fitResult={fitResult} selected={selected}
+              onSelect={setSelected} onMove={ro ? undefined : move} onAdd={adding && !ro ? add : undefined} />
+            <div className="frame-strip" aria-label="Other runs">
+              {Object.entries(samples).map(([r, s]) => (
+                <button key={r} className={`frame-pick ${r === run ? "tab-on" : ""}`} onClick={() => setRun(r)} aria-label={`Show ${r}`}>
+                  <FrameView src={api.frameUrl(view.id, r)} sample={s} data={data} small />
+                  <span className="mono">{r}</span>
+                </button>
+              ))}
+            </div>
           </div>
-        </div>
-      )}
-      <SlotTable data={data} readOnly={ro} onChange={onChange} selected={selected} onSelect={setSelected} />
-      <div className="row">
-        <label>Default radius <input type="number" step="0.01" min="0.01" max="1" value={layout.match_radius} disabled={ro}
-          onChange={(e) => set({ match_radius: Number(e.target.value) })} /></label>
-        <label>Anchor follow <input type="number" step="0.05" min="0.05" max="1" placeholder="0.1" value={layout.anchor_follow ?? ""} disabled={ro}
-          onChange={(e) => set({ anchor_follow: e.target.value === "" ? undefined : Number(e.target.value) })} /></label>
-        <label>Removal wait (s) <input type="number" step="0.5" min="0.5" placeholder="0.5" value={layout.removal_seconds ?? ""} disabled={ro}
-          onChange={(e) => set({ removal_seconds: e.target.value === "" ? null : Number(e.target.value) })} /></label>
-      </div>
-      <p className="muted">
-        Anchor follow: how closely the anchor box tracks each detection (1 = every frame, for a shaking camera).
-        Removal wait: how long a slot must read empty before its part counts as removed (longer rides out detector
-        flicker, but alerts come later).
-      </p>
-    </div>
+        ) : (
+          <EmptyNote compact icon={<SlotsIcon />} title="No frame to draw on yet">Frames from the recordings appear here after "Suggest slots".</EmptyNote>
+        )}
+      </Panel>
+      <Panel title="Slots">
+        <SlotTable data={data} readOnly={ro} onChange={onChange} selected={selected} onSelect={setSelected} />
+      </Panel>
+      <Box component="details" sx={{ border: `1px solid ${plantColor.line}`, bgcolor: plantColor.surface, px: 1.5, py: 1 }}>
+        <Box component="summary" sx={{ cursor: "pointer", fontSize: 13.5, fontWeight: 700 }}>Advanced</Box>
+        <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "repeat(3, minmax(0, 1fr))" }, gap: 2, mt: 1.5 }}>
+          <FormField label="Default radius" htmlFor="default-radius">
+            <TextField id="default-radius" type="number" size="small" value={layout.match_radius} disabled={ro} sx={fieldSx}
+              slotProps={{ htmlInput: { step: 0.01, min: 0.01, max: 1 } }} onChange={(e) => set({ match_radius: Number(e.target.value) })}
+              helperText="How far from a slot's centre a part still counts as in it, in anchor widths." />
+          </FormField>
+          <FormField label="Anchor follow" htmlFor="anchor-follow">
+            <TextField id="anchor-follow" type="number" size="small" placeholder="0.1" value={layout.anchor_follow ?? ""} disabled={ro} sx={fieldSx}
+              slotProps={{ htmlInput: { step: 0.05, min: 0.05, max: 1 } }}
+              onChange={(e) => set({ anchor_follow: e.target.value === "" ? undefined : Number(e.target.value) })}
+              helperText="How closely the slots follow the anchor from frame to frame (1 = every frame, for a shaking camera)." />
+          </FormField>
+          <FormField label="Removal wait (s)" htmlFor="removal-wait">
+            <TextField id="removal-wait" type="number" size="small" placeholder="0.5" value={layout.removal_seconds ?? ""} disabled={ro} sx={fieldSx}
+              slotProps={{ htmlInput: { step: 0.5, min: 0.5 } }}
+              onChange={(e) => set({ removal_seconds: e.target.value === "" ? null : Number(e.target.value) })}
+              helperText="How long a slot must look empty before its part counts as removed. Longer rides out detector flicker; alerts come later." />
+          </FormField>
+        </Box>
+      </Box>
+      <ConfirmDialog open={replacing} tone="accent" title="Replace the slots?" actionLabel="Use the suggested slots"
+        body="The current slots are replaced by the suggested ones (named slot_1, slot_2, …). Rename them afterwards; steps that used the old names lose their evidence."
+        onClose={() => setReplacing(false)} onConfirm={apply} />
+    </Box>
   );
 }

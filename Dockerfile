@@ -80,3 +80,13 @@ CMD []
 
 # Default target: the runtime image.
 FROM runtime
+
+# End-to-end tests of the dashboard against the running stack, in a browser:
+# `docker compose --profile e2e run --rm e2e` (web/e2e; the browser image's version matches @playwright/test there).
+FROM mcr.microsoft.com/playwright:v1.48.2-noble AS e2e
+WORKDIR /e2e
+COPY web/e2e/package.json web/e2e/package-lock.json ./
+RUN npm ci
+COPY web/e2e/ ./
+ENTRYPOINT ["npx", "playwright", "test"]
+CMD []

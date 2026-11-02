@@ -21,6 +21,7 @@ class NewSop(BaseModel):
     id: str
     name: str = ""
     description: str = ""
+    recordings_from: str | None = None  # an SOP id whose recordings folder the new SOP shares
 
 
 class SaveSop(BaseModel):
@@ -64,14 +65,17 @@ def builder_router(settings: Settings, manager: RunManager) -> APIRouter:
             entry = out.setdefault(sf.id, {"id": sf.id, "name": sf.data.get("name") or sf.id, "draft": False,
                                            "published": False, "loaded": sf.id in manager.sops})
             entry["draft" if sf.draft else "published"] = True
-            if sf.draft:
+            if sf.draft or "runs" not in entry:  # the draft is what the builder edits: its name and folder win
                 entry["name"] = sf.data.get("name") or sf.id
+                entry["dataset_dir"] = (sf.data.get("dataset") or {}).get("dir") or sf.id
+                entry["runs"] = len(recordings(settings, sf.data))
         return sorted(out.values(), key=lambda e: e["name"].lower())
 
     @r.post("/sops", status_code=201)
     def create(body: NewSop):
         try:
-            drafts.new_draft(settings, body.id, body.name, body.description)
+            folder = drafts.recordings_dir_of(settings, body.recordings_from) if body.recordings_from else None
+            drafts.new_draft(settings, body.id, body.name, body.description, dataset_dir=folder)
         except DraftError as e:
             raise HTTPException(400, str(e)) from None
         return view(body.id)

@@ -1,27 +1,20 @@
+import type { ReactNode } from "react";
 import { clock } from "../format";
 import type { RunStatus } from "../state";
+import { AppShell } from "../ui/AppShell";
+import { StatusPill } from "../ui/kit";
 
-type Props = { title: string; version?: number; source?: string; elapsed: number; status: RunStatus; running: boolean };
+type Props = { title: string; version?: number; source?: string; elapsed: number; status: RunStatus; running: boolean; children?: ReactNode };
 
-export function TopBar({ title, version, source, elapsed, status, running }: Props) {
-  const tone = status === "On track" ? "ok" : status === "Deviation" ? "bad" : "warn";
+/** The dashboard's frame: the SOP's name, the run clock and the run's state at the right. */
+export function TopBar({ title, version, source, elapsed, status, running, children }: Props) {
+  const live = running || status !== "On track";
+  const health = !live ? "idle" : status === "On track" ? "ok" : status === "Deviation" ? "bad" : "warn";
+  const subtitle = [version !== undefined ? `v${version}` : "", source ?? ""].filter(Boolean).join(" · ");
   return (
-    <header className="topbar card">
-      <div className="topbar-title">
-        <span className="logo" aria-hidden="true">◧</span>
-        <span className="name">{title}</span>
-        {version !== undefined && <span className="muted">v{version}</span>}
-        {source && <span className="muted">· {source}</span>}
-      </div>
-      <div className="topbar-right">
-        <a className="muted" href="#/sops">SOPs</a>
-        <a className="muted" href="#/record">Record</a>
-        <a className="muted" href="#/latency">Camera latency</a>
-        <span className="timer" aria-label="Run time">{clock(elapsed)}</span>
-        <span role="status" className={`pill pill-${running || status !== "On track" ? tone : "idle"}`}>
-          {running || status !== "On track" ? status : "No run"}
-        </span>
-      </div>
-    </header>
+    <AppShell title={title} subtitle={subtitle || undefined} current="dashboard"
+      status={<><span className="timer" aria-label="Run time">{clock(elapsed)}</span><StatusPill health={health} label={live ? status : "No run"} /></>}>
+      {children}
+    </AppShell>
   );
 }

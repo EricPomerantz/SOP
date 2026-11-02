@@ -74,7 +74,16 @@ def validate(data: dict) -> list[str]:
     return []
 
 
-def new_draft(settings: Settings, sop_id: str, name: str, description: str) -> SopFile:
+def recordings_dir_of(settings: Settings, sop_id: str) -> str:
+    """The dataset folder (under datasets_dir) an SOP's recordings live in, for a new SOP that reuses them."""
+    sf = current(settings, sop_id)
+    folder = (sf.data.get("dataset") or {}).get("dir") or sop_id
+    if not (settings.datasets_dir / folder / "runs").is_dir():
+        raise DraftError(f"{sop_id} has no recordings to reuse (datasets/{folder}/runs)")
+    return folder
+
+
+def new_draft(settings: Settings, sop_id: str, name: str, description: str, dataset_dir: str | None = None) -> SopFile:
     if not SOP_ID.match(sop_id):
         raise DraftError("SOP id: lower-case letters, digits and '_', starting with a letter (2-48 characters)")
     draft, published = find(settings, sop_id)
@@ -89,7 +98,7 @@ def new_draft(settings: Settings, sop_id: str, name: str, description: str) -> S
         "layout": {"anchor": "", "match_radius": 0.1, "slots": {}},
         "steps": [], "order": "strict", "off_sop": DEFAULT_OFF_SOP, "idle": "No one is working.",
         "decisions": {"accept_confidence": 0.8, "hold_seconds": 1.0, "evidence_only_after": 1.0},
-        "dataset": {"format": "timeline", "dir": sop_id},
+        "dataset": {"format": "timeline", "dir": dataset_dir or sop_id},
     }
     return write(SopFile(sop_id, path, True, data), data)
 
@@ -156,16 +165,28 @@ def publish(settings: Settings, sop_id: str) -> Path:
     return target
 
 
+NUMBERED_SLOT = re.compile(r"^[a-z]+_(\d+)$")
+
+
 def generate_steps(data: dict) -> dict:
     """Steps from the layout: a place step per slot (any order), then, with a tool, a torque step per slot in slot
-    order as a sequence. Returns the `steps`, `order` and `groups` fields; the builder shows them for editing."""
+    order as a sequence. Returns the `steps`, `order` and `groups` fields; the builder shows them for editing.
+
+    Slots numbered `<word>_<n>` (hole_1, hole_2, ...) give short ids and labels (`place_1`, "Place 1"), in number
+    order, so the ids match timelines labelled by slot number; any other naming keeps the whole slot name."""
     slots = list((data.get("layout") or {}).get("slots") or {})
     tool = bool((data.get("layout") or {}).get("tools"))
-    places = [{"id": f"place_{s}", "label": f"Place {_words(s)}", "text": f"Install the part in {_words(s)}.",
+    numbers = [m.group(1) for s in slots if (m := NUMBERED_SLOT.match(s))]
+    if len(numbers) == len(slots) and len(set(numbers)) == len(slots):
+        short = {s: n for s, n in zip(slots, numbers)}
+        slots = sorted(slots, key=lambda s: int(short[s]))
+    else:
+        short = {s: s for s in slots}
+    places = [{"id": f"place_{short[s]}", "label": f"Place {_words(short[s])}", "text": f"Install the part in {_words(s)}.",
                "evidence": {s: "installed"}} for s in slots]
     if not tool:
         return {"steps": places, "order": "strict", "groups": None}
-    torques = [{"id": f"torque_{s}", "label": f"Torque {_words(s)}",
+    torques = [{"id": f"torque_{short[s]}", "label": f"Torque {_words(short[s])}",
                 "text": f"Torque the part in {_words(s)} with the {_words(data['layout']['tools'][0])}.",
                 "evidence": {s: "torqued"}} for s in slots]
     return {"steps": places + torques, "order": "groups",

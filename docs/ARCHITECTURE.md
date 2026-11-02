@@ -44,7 +44,7 @@ flowchart LR
 
 | Service | Profile | What it is |
 |---|---|---|
-| `sopvision` | default | The app: FastAPI server, run pipeline, built dashboard (`Dockerfile`) |
+| `sopvision` | default | The app: FastAPI server, run pipeline, built dashboard (`Dockerfile` target `runtime`) |
 | `decider` | `decider` | Mapika/decider-4b behind its own `/v1/systemone` server (`docker/decider.Dockerfile`, `decider_serve.py`) |
 | `laya` | `laya` | Laya behind `laya-serve`; `LAYA_CHECKPOINT` swaps in a shared fine-tune, `registry.json` adds one per SOP (`docker/laya.Dockerfile`, `laya_serve.py`) |
 | `worker` | default | Runs the SOP builder's background jobs (timeline drafts, slot auto-fit, Laya training) from `data/jobs` (`Dockerfile` target `worker`) |
@@ -54,6 +54,7 @@ flowchart LR
 | `trainer` | `training` | The tools image with GPU access and a detector-training entrypoint |
 | `web-tests` | `test` | Frontend tests and production build with container-owned Node dependencies |
 | `web-dev` | `dev` | Vite development server (5173), forwarding API/WebSocket traffic to the app |
+| `e2e` | `e2e` | Playwright in a browser against the running app and worker: a smoke pass over every page, and the lug-bolt SOP rebuilt through the UI and compared with `sops/lug_bolts.yaml` (`web/e2e`, `Dockerfile` target `e2e`) |
 | `labelstudio` | `labelling` | Browser annotation for detector and reference boxes (8080), with persistent project storage |
 
 Docker is the sole supported execution environment. Runtime model/SOP/scenario inputs remain read-only; tools
@@ -157,7 +158,9 @@ src/sopvision/
   server/           FastAPI app (REST, /ws, MJPEG), RunManager (one run at a time), frame buffer
   evaluation/       acceptance eval, report comparison, scenario videos, Jev-vs-local metrics, request variants,
                     SOP-driven deviation generators (deviations.py)
-web/                React + Vite dashboard (built into the app image)
+web/                React + Vite dashboard (built into the app image), on the deviceWISE suite's MUI theme: theme.ts and
+                    theme/ are copied unchanged from devicewise-intelligence-suite/frontend, ui/ holds its page kit
+                    (PageHeader look, Panel, KpiTile, FormDialog, ConfirmDialog, toasts); web/e2e has the Playwright tests
 sops/               SOP definitions (server_fan.yaml); sops/drafts/ for SOPs without a trained detector yet (lug_bolts.yaml)
 training/           YOLO detector: frame sampling, reference labelling, dataset build, training
 scripts/            benchmarks, decision-model data pipeline, smoke tests (below)

@@ -71,10 +71,35 @@ def test_only_detection_models_are_accepted(settings, tmp_path):
 
 def test_generated_steps_place_in_any_order_then_torque_in_sequence(settings, tmp_path):
     sf = filled(drafts.new_draft(settings, "wheel", "Wheel", ""))
-    assert [s["id"] for s in sf.data["steps"]] == ["place_hole_1", "place_hole_2", "torque_hole_1", "torque_hole_2"]
-    assert sf.data["groups"] == [["place_hole_1", "place_hole_2"], {"sequence": ["torque_hole_1", "torque_hole_2"]}]
+    assert [s["id"] for s in sf.data["steps"]] == ["place_1", "place_2", "torque_1", "torque_2"]
+    assert sf.data["groups"] == [["place_1", "place_2"], {"sequence": ["torque_1", "torque_2"]}]
+    assert sf.data["steps"][0]["label"] == "Place 1" and "hole 1" in sf.data["steps"][0]["text"]
+    assert sf.data["steps"][2]["label"] == "Torque 1" and "wrench" in sf.data["steps"][2]["text"]
     no_tool = dict(sf.data, layout=dict(sf.data["layout"], tools=[]))
     assert drafts.generate_steps(no_tool)["order"] == "strict"
+
+
+def test_generated_step_ids_use_the_slot_number_only_when_every_slot_is_numbered():
+    numbered = {"layout": {"slots": {"hole_10": {}, "hole_2": {}, "hole_1": {}}, "tools": []}}
+    assert [s["id"] for s in drafts.generate_steps(numbered)["steps"]] == ["place_1", "place_2", "place_10"]
+    mixed = {"layout": {"slots": {"hole_1": {}, "fan": {}}, "tools": []}}
+    assert [s["id"] for s in drafts.generate_steps(mixed)["steps"]] == ["place_hole_1", "place_fan"]
+    clash = {"layout": {"slots": {"hole_1": {}, "slot_1": {}}, "tools": []}}
+    assert [s["id"] for s in drafts.generate_steps(clash)["steps"]] == ["place_hole_1", "place_slot_1"]
+
+
+def test_a_new_draft_can_reuse_another_sops_recordings(settings, tmp_path):
+    (tmp_path / "datasets" / "lug_bolts" / "runs").mkdir(parents=True)
+    src = drafts.new_draft(settings, "lug_bolts_torque", "Wheel lug bolts", "")
+    drafts.write(src, dict(src.data, dataset={"format": "timeline", "dir": "lug_bolts"}))
+    assert drafts.recordings_dir_of(settings, "lug_bolts_torque") == "lug_bolts"
+    clone = drafts.new_draft(settings, "lug_bolts_ui", "Clone", "", dataset_dir="lug_bolts")
+    assert clone.data["dataset"] == {"format": "timeline", "dir": "lug_bolts"}
+    assert drafts.new_draft(settings, "fresh", "Fresh", "").data["dataset"]["dir"] == "fresh"
+    with pytest.raises(DraftError, match="no recordings"):
+        drafts.recordings_dir_of(settings, "fresh")
+    with pytest.raises(DraftError, match="No SOP"):
+        drafts.recordings_dir_of(settings, "nope")
 
 
 def test_publish_moves_a_valid_draft_and_editing_bumps_the_version(settings, tmp_path):

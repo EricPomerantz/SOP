@@ -73,9 +73,8 @@ export default function App({ api = httpApi, connect = connectSocket }: Props) {
   });
 
   return (
-    <main className="app">
-      <TopBar title={sop?.name ?? "SOP Vision"} version={sop?.version} source={source?.label}
-              elapsed={state.elapsed} status={state.status} running={running} />
+    <TopBar title={sop?.name ?? "SOP Vision"} version={sop?.version} source={source?.label}
+            elapsed={state.elapsed} status={state.status} running={running}>
       {error && <p className="error" role="alert">{error}</p>}
       <div className="main-grid">
         <VideoPanel src={api.videoUrl} running={running} chassisVisible={state.chassisVisible} />
@@ -100,6 +99,6 @@ export default function App({ api = httpApi, connect = connectSocket }: Props) {
         onPauseToggle={() => guard(async () => { if (run) { await api.control(run.run_id, paused ? "resume" : "pause"); setPaused(!paused); } })}
         onSpeed={(s) => guard(async () => { if (run) { await api.control(run.run_id, undefined, s); setSpeed(s); } })}
       />
-    </main>
+    </TopBar>
   );
 }

@@ -1,119 +1,123 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
-import { builderApi, type BuilderApi, type SopData, type SopView } from "../../builderApi";
+import { Box, Button, IconButton, Tooltip, Typography } from "@mui/material";
+import { Edit as EditIcon, Publish as PublishIcon, Settings as SettingsIcon } from "@mui/icons-material";
+import { builderApi, type BuilderApi, type SopData, type SopView, type StageId } from "../../builderApi";
+import { AppShell } from "../../ui/AppShell";
+import { ConfirmDialog } from "../../ui/ConfirmDialog";
+import { useGlobalAlert } from "../../ui/GlobalAlertProvider";
+import { EmptyNote, HealthLabel, StatusPill, plantColor } from "../../ui/kit";
+import { plantBtn } from "../../ui/plantTheme";
 import { DetectorStage } from "./DetectorStage";
 import { LayoutStage } from "./LayoutStage";
+import { PublishDialog } from "./PublishDialog";
 import { RecordingsStage } from "./RecordingsStage";
+import { SopSettingsDialog } from "./SopSettingsDialog";
+import { StageFrame } from "./StageFrame";
+import { StageStepper } from "./StageStepper";
 import { StepsStage } from "./StepsStage";
 import { TimelinesStage } from "./TimelinesStage";
 import { TrainStage } from "./TrainStage";
+import { stageHash } from "./stages";
+import { useAutoSave } from "./useAutoSave";
 
-type Props = { sopId: string; api?: BuilderApi; confirm?: (m: string) => boolean; go?: (hash: string) => void };
+type Props = { sopId: string; stage?: StageId; api?: BuilderApi; go?: (hash: string) => void };
 
-const STAGES = ["detector", "recordings", "layout", "steps", "timelines", "train"] as const;
-type Stage = (typeof STAGES)[number];
-const TITLES: Record<Stage, string> = {
-  detector: "1 Detector", recordings: "2 Recordings", layout: "3 Slots", steps: "4 Steps",
-  timelines: "5 Timelines", train: "6 Decision model",
-};
-
-function done(view: SopView, stage: Stage): boolean {
-  const s = view.status;
-  switch (stage) {
-    case "detector": return s.detector && s.roles;
-    case "recordings": return s.recordings.train > 0 && s.recordings.val > 0 && s.recordings.test > 0;
-    case "layout": return s.layout;
-    case "steps": return s.steps;
-    case "timelines": return Object.values(s.recordings).reduce((a, b) => a + b, 0) > 0
-      && Object.keys(s.recordings).every((k) => s.timelines[k] === s.recordings[k]);
-    case "train": return !!s.laya_checkpoint;
-  }
-}
-
-/** One SOP from detector to decision model (#/sops/<id>): edits a draft, publishes it into the app's SOPs. */
-export function SopBuilder({ sopId, api = builderApi, confirm = (m) => window.confirm(m), go = (h) => { window.location.hash = h; } }: Props) {
+/**
+ * One SOP from detector to decision model (#/sops/<id>/<stage>): a draft edited stage by stage, saved as it is
+ * edited, and published into the app's SOPs after a review.
+ */
+export function SopBuilder({ sopId, stage: stageProp, api = builderApi, go = (h) => { window.location.hash = h; } }: Props) {
+  const alert = useGlobalAlert();
   const [view, setView] = useState<SopView | null>(null);
   const [data, setData] = useState<SopData | null>(null);
-  const [dirty, setDirty] = useState(false);
-  const [stage, setStage] = useState<Stage>("detector");
+  const [stage, setStage] = useState<StageId>(stageProp ?? "detector");
   const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
+  const [dialog, setDialog] = useState<"publish" | "settings" | "discard" | null>(null);
 
-  const show = useCallback((v: SopView) => { setView(v); setData(v.data); setDirty(false); }, []);
-  const reload = useCallback(() => api.get(sopId).then(show).catch((e) => setError(e.message)), [api, sopId, show]);
-  useEffect(() => { reload(); }, [reload]);
+  useEffect(() => { if (stageProp) setStage(stageProp); }, [stageProp]);
+
+  const save = useCallback((d: SopData, signal: AbortSignal) => api.save(sopId, d, signal), [api, sopId]);
+  const onSaved = useCallback((v: SopView) => setView(v), []);
+  const auto = useAutoSave({ data: data as SopData, enabled: !!data && !!view?.draft, save, onSaved });
+  const { markSaved, flush } = auto;
+
+  /** The server's view after an action that replaced the draft: what's shown and what counts as saved. */
+  const show = useCallback((v: SopView) => { setView(v); setData(v.data); markSaved(v.data); }, [markSaved]);
+  const reload = useCallback(() => api.get(sopId).then((v) => { setView(v); setData((d) => d ?? v.data); if (!v.draft) markSaved(v.data); }).catch((e) => setError(e.message)), [api, sopId, markSaved]);
+  useEffect(() => { api.get(sopId).then(show).catch((e) => setError(e.message)); }, [api, sopId, show]);
 
   const act = async (action: () => Promise<void>) => {
     setError("");
-    setNotice("");
     try { await action(); } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
   };
-  const save = () => act(async () => { if (data) show(await api.save(sopId, data)); });
-  const change = (d: SopData) => { setData(d); setDirty(true); };
-  const viewChange = (v: SopView) => show(v);
+  const goStage = (s: StageId) => { setStage(s); go(stageHash(sopId, s)); };
 
   if (!view || !data) {
-    return <main className="app builder">{error ? <p className="error" role="alert">{error}</p> : <p className="muted">Loading…</p>}</main>;
+    return (
+      <AppShell title="SOP builder" current="sops">
+        {error ? <Typography role="alert" color="error">{error}</Typography> : <EmptyNote title="Loading…" />}
+      </AppShell>
+    );
   }
   const s = view.status;
-  const publish = () => act(async () => {
-    if (dirty) await api.save(sopId, data);
-    show(await api.publish(sopId));
-    setNotice("Published: the SOP is in the dashboard's SOP list.");
-  });
-  const discard = () => act(async () => {
-    if (!confirm(s.published ? "Throw away the changes in this draft? The published SOP stays as it is." : "Delete this draft SOP?")) return;
+  const change = (d: SopData) => setData(d);
+  const publish = async () => {
+    await flush();
+    const v = await api.publish(sopId);
+    show(v);
+    setDialog(null);
+    alert.success(`${v.data.name || v.id} is published and in the dashboard's SOP list.`, { actionLabel: "Open the dashboard", onAction: () => go("#/") });
+  };
+  const discard = async () => {
     const r = await api.discard(sopId);
-    if ("deleted" in r) go("#/sops"); else show(r);
-  });
+    if ("deleted" in r) { go("#/sops"); } else { show(r); setDialog(null); }
+  };
   const edit = () => act(async () => show(await api.edit(sopId)));
 
-  const stages: Record<Stage, ReactNode> = {
-    detector: <DetectorStage api={api} view={view} data={data} onChange={change} onView={viewChange} />,
-    recordings: <RecordingsStage view={view} />,
-    layout: <LayoutStage api={api} view={view} data={data} onChange={change} />,
-    steps: <StepsStage api={api} view={view} data={data} onChange={change} />,
-    timelines: <TimelinesStage api={api} view={view} onReload={reload} />,
-    train: <TrainStage api={api} view={view} onReload={reload} />,
+  const stageStatus = s.stages?.find((st) => st.id === stage);
+  const stages: Record<StageId, ReactNode> = {
+    detector: <DetectorStage api={api} view={view} data={data} onChange={change} onView={show} flush={flush} />,
+    recordings: <RecordingsStage api={api} view={view} />,
+    layout: <LayoutStage api={api} view={view} data={data} onChange={change} flush={flush} />,
+    steps: <StepsStage api={api} view={view} data={data} onChange={change} flush={flush} />,
+    timelines: <TimelinesStage api={api} view={view} onReload={reload} flush={flush} />,
+    train: <TrainStage api={api} view={view} onReload={reload} flush={flush} />,
   };
+  const saveLabel = auto.state === "clean" ? "All changes saved" : auto.state === "error" ? `Couldn't save: ${auto.error}` : "Saving…";
 
   return (
-    <main className="app builder">
-      <header className="topbar card">
-        <div className="topbar-title">
-          <span className="name">{data.name || view.id}</span>
-          <span className="muted mono">{view.id} v{data.version}</span>
-          {view.draft ? <span className="pill pill-idle">draft</span> : <span className="pill pill-ok">published</span>}
-          {dirty && <span className="pill pill-warn">unsaved</span>}
-        </div>
-        <div className="topbar-right">
+    <AppShell title={data.name || view.id} subtitle={`${view.id} · v${data.version}`} current="sops"
+      status={
+        <>
+          {view.draft && <HealthLabel health={auto.state === "error" ? "bad" : auto.state === "clean" ? "ok" : "pending"} label={saveLabel} strong={false} />}
+          <StatusPill health={view.draft ? "idle" : s.loaded ? "ok" : "warn"} label={view.draft ? (s.published ? "Draft of a published SOP" : "Draft") : s.loaded ? "Published · live" : "Published"} />
           {view.draft ? (
             <>
-              <button onClick={save} disabled={!dirty}>Save</button>
-              <button onClick={publish} disabled={s.errors.length > 0 && !dirty}>Publish</button>
-              <button className="discard" onClick={discard}>{s.published ? "Discard changes" : "Delete draft"}</button>
+              <Tooltip title="Name, description, recordings folder"><IconButton aria-label="Settings" size="small" onClick={() => setDialog("settings")}><SettingsIcon fontSize="small" /></IconButton></Tooltip>
+              <Button variant="contained" disableElevation sx={plantBtn} startIcon={<PublishIcon />} onClick={() => setDialog("publish")}>Review and publish</Button>
+              <Button variant="text" color="error" sx={plantBtn} onClick={() => setDialog("discard")}>{s.published ? "Discard changes" : "Delete draft"}</Button>
             </>
-          ) : <button onClick={edit}>Edit</button>}
-          <a className="muted" href="#/sops">All SOPs</a>
-        </div>
-      </header>
-      {error && <p className="error" role="alert">{error}</p>}
-      {notice && <p role="status" className="notice">{notice}</p>}
-      {view.draft && s.errors.length > 0 && !dirty && (
-        <details className="card errors"><summary>{s.errors.length} thing{s.errors.length > 1 ? "s" : ""} to fix before publishing</summary>
-          <ul>{s.errors.map((e) => <li key={e}>{e}</li>)}</ul></details>
+          ) : (
+            <Button variant="contained" disableElevation sx={plantBtn} startIcon={<EditIcon />} onClick={edit}>Edit</Button>
+          )}
+        </>
+      }>
+      {error && <Typography role="alert" sx={{ fontSize: 13, color: plantColor.ink, bgcolor: plantColor.surface, border: `1px solid ${plantColor.line}`, borderLeft: "3px solid", borderLeftColor: "error.main", px: 1.5, py: 1 }}>{error}</Typography>}
+      {!view.draft && (
+        <Typography sx={{ fontSize: 13, color: plantColor.muted }}>
+          This SOP is published. Its stages are shown as they are; press Edit to change them in a draft copy (runs keep using the published version until the draft is published).
+        </Typography>
       )}
-      <nav className="tabs card" aria-label="Stages">
-        {STAGES.map((st) => (
-          <button key={st} className={`tab ${stage === st ? "tab-on" : ""}`} aria-pressed={stage === st} onClick={() => setStage(st)}>
-            <span className={done(view, st) ? "step-done" : "muted"}>{done(view, st) ? "✓" : "○"}</span> {TITLES[st]}
-          </button>
-        ))}
-      </nav>
-      <section className="card stage-card" aria-label={TITLES[stage]}>
-        {view.draft || stage === "recordings" || stage === "timelines" || stage === "train" ? null
-          : <p className="muted">Published SOPs are read-only here: press Edit to change a draft copy.</p>}
-        {stages[stage]}
-      </section>
-    </main>
+      <StageStepper stages={s.stages ?? []} current={stage} onGo={goStage} />
+      <StageFrame stage={stage} status={stageStatus} onGo={goStage}>
+        <Box className="stage-body">{stages[stage]}</Box>
+      </StageFrame>
+      <PublishDialog open={dialog === "publish"} view={view} data={data} onClose={() => setDialog(null)} onPublish={publish} />
+      <SopSettingsDialog open={dialog === "settings"} api={api} data={data} onClose={() => setDialog(null)} onChange={change} />
+      <ConfirmDialog open={dialog === "discard"} onClose={() => setDialog(null)} onConfirm={discard}
+        title={s.published ? "Throw away the changes in this draft?" : "Delete this draft SOP?"}
+        body={s.published ? "The published SOP stays as it is; the edits made since are lost." : "The draft, its roles, slots and steps are deleted. Recordings and timelines on disk are kept."}
+        confirmText={view.id} actionLabel={s.published ? "Discard changes" : "Delete"} />
+    </AppShell>
   );
 }

@@ -1,0 +1,128 @@
+/* Shared alert chrome for every deviceWISE application.
+   Colors come from the CSS variables painted by theme/tokens.json. */
+
+.dw-alert {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 10px 12px 10px 14px;
+  background: var(--dw-surface, #ffffff);
+  color: var(--dw-ink, #1a2332);
+  border: 1px solid var(--dw-line, rgba(0, 0, 0, 0.08));
+  border-left-width: 3px;
+  border-left-style: solid;
+  border-radius: var(--dw-radius, 0);
+  font-family: var(--dw-font, Inter, sans-serif);
+  font-size: 0.8125rem;
+  line-height: 1.45;
+  box-shadow: none;
+  pointer-events: auto;
+}
+
+.dw-alert-success { border-left-color: var(--dw-success, #2e7d32); }
+.dw-alert-info { border-left-color: var(--dw-accent, #002f70); }
+.dw-alert-warning { border-left-color: var(--dw-warning, #ed6c02); }
+.dw-alert-error { border-left-color: var(--dw-danger, #d32f2f); }
+.dw-alert-loading { border-left-color: var(--dw-accent, #002f70); }
+
+.dw-alert-success .dw-alert-icon { color: var(--dw-success, #2e7d32); }
+.dw-alert-info .dw-alert-icon { color: var(--dw-accent, #002f70); }
+.dw-alert-warning .dw-alert-icon { color: var(--dw-warning, #ed6c02); }
+.dw-alert-error .dw-alert-icon { color: var(--dw-danger, #d32f2f); }
+.dw-alert-loading .dw-alert-icon { color: var(--dw-accent, #002f70); }
+
+.dw-alert-icon {
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  margin-top: 1px;
+}
+
+.dw-alert-icon svg {
+  display: block;
+  width: 20px;
+  height: 20px;
+}
+
+.dw-alert-loading .dw-alert-icon svg {
+  animation: dw-alert-spin 0.8s linear infinite;
+}
+
+.dw-alert-body {
+  min-width: 0;
+  flex: 1;
+}
+
+.dw-alert-title {
+  margin: 0 0 2px;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--dw-ink, #1a2332);
+}
+
+.dw-alert-message {
+  color: var(--dw-ink, #1a2332);
+  overflow-wrap: anywhere;
+}
+
+.dw-alert-message p {
+  margin: 0;
+}
+
+.dw-alert-close {
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--dw-muted, #5a6a7a);
+  cursor: pointer;
+}
+
+.dw-alert-close:hover {
+  color: var(--dw-ink, #1a2332);
+}
+
+.dw-alert-close svg {
+  display: block;
+  width: 16px;
+  height: 16px;
+  margin: 2px;
+}
+
+.dw-alert-link {
+  display: inline-block;
+  margin-top: 6px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--dw-accent, #002f70);
+  font: inherit;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.dw-alert-link:hover {
+  text-decoration: underline;
+}
+
+@keyframes dw-alert-spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes dwToastIn {
+  from { transform: translateY(12px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+@keyframes dwToastOut {
+  from { transform: translateY(0); opacity: 1; }
+  to { transform: translateY(8px); opacity: 0; }
+}

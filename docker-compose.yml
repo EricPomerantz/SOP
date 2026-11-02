@@ -1,6 +1,8 @@
 services:
   sopvision:
-    build: .
+    build:
+      context: .
+      target: runtime  # not the Dockerfile's last stage (that is a test or worker image)
     image: sopvision:latest
     ports:
       - "8000:8000"
@@ -117,6 +119,31 @@ services:
       context: .
       target: web-tests
     image: sopvision:web-tests
+
+  # The dashboard driven in a browser against the running app and worker (start them with ./start.sh first):
+  # `docker compose --profile e2e run --rm e2e` (all), `... e2e smoke.spec.ts` (a quick look at every page).
+  # lug_bolts_clone.spec.ts rebuilds the lug-bolt SOP through the UI as lug_bolts_ui, publishes it, compares it with
+  # sops/lug_bolts.yaml and removes it again (E2E_KEEP=1 keeps it). Screenshots and the report: web/e2e/test-results.
+  e2e:
+    profiles: [e2e]
+    build:
+      context: .
+      target: e2e
+    image: sopvision:e2e
+    environment:
+      E2E_BASE_URL: http://sopvision:8000
+      E2E_SOP_ID: lug_bolts_ui
+      E2E_SOURCE_SOP: lug_bolts_torque
+      E2E_SOURCE_FILE: lug_bolts.yaml
+      E2E_SLOT_TOL: ${E2E_SLOT_TOL:-0.03}
+      E2E_DRAFT_RUN: correct10
+      E2E_REPO: /repo
+      E2E_HOST_USER: ${E2E_HOST_USER:-1000:1000}
+      E2E_KEEP: ${E2E_KEEP:-0}
+    volumes:
+      - ./sops:/repo/sops  # the clone's draft and published file (removed after the run)
+      - ./data/builder:/repo/data/builder  # its slot suggestion (removed after the run)
+      - ./web/e2e/test-results:/e2e/test-results
 
   web-dev:
     profiles: [dev]

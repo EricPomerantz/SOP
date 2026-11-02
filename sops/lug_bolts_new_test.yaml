@@ -1,0 +1,155 @@
+sop: lug_bolts_new_test
+name: lug bolts new test
+version: 1
+description: put the colored lug bolts into their correct slot and torque in a star pattern.
+detector:
+  weights: models/lug_bolts/best.pt
+  classes:
+  - hub
+  - hole_empty
+  - lug_bolt_blue
+  - lug_bolt_green
+  - lug_bolt_red
+  - lug_bolt_gold
+  - torque_wrench
+  - hand
+  roles:
+    hole_empty: empty
+    lug_bolt_blue: part
+    lug_bolt_green: part
+    lug_bolt_red: part
+    lug_bolt_gold: part
+layout:
+  anchor: hub
+  match_radius: 0.05
+  slots:
+    slot_1:
+      at:
+      - 0.604
+      - 0.158
+      filled_by:
+      - lug_bolt_blue
+      - lug_bolt_green
+      - lug_bolt_red
+      - lug_bolt_gold
+      empty_as: hole_empty
+      match_radius: null
+    slot_2:
+      at:
+      - 0.198
+      - 0.306
+      filled_by:
+      - lug_bolt_blue
+      - lug_bolt_green
+      - lug_bolt_red
+      - lug_bolt_gold
+      empty_as: hole_empty
+      match_radius: null
+    slot_3:
+      at:
+      - 0.863
+      - 0.497
+      filled_by:
+      - lug_bolt_blue
+      - lug_bolt_green
+      - lug_bolt_red
+      - lug_bolt_gold
+      empty_as: hole_empty
+      match_radius: null
+    slot_4:
+      at:
+      - 0.245
+      - 0.687
+      filled_by:
+      - lug_bolt_blue
+      - lug_bolt_green
+      - lug_bolt_red
+      - lug_bolt_gold
+      empty_as: hole_empty
+      match_radius: 0.109
+    slot_5:
+      at:
+      - 0.621
+      - 0.822
+      filled_by:
+      - lug_bolt_blue
+      - lug_bolt_green
+      - lug_bolt_red
+      - lug_bolt_gold
+      empty_as: hole_empty
+      match_radius: null
+  tools:
+  - torque_wrench
+steps:
+- id: place_1
+  text: Thread a lug bolt into hole 1.
+  evidence:
+    slot_1: installed
+  label: Bolt 1
+- id: place_2
+  text: Thread a lug bolt into hole 2.
+  evidence:
+    slot_2: installed
+  label: Bolt 2
+- id: place_3
+  text: Thread a lug bolt into hole 3.
+  evidence:
+    slot_3: installed
+  label: Bolt 3
+- id: place_4
+  text: Thread a lug bolt into hole 4.
+  evidence:
+    slot_4: installed
+  label: Bolt 4
+- id: place_5
+  text: Thread a lug bolt into hole 1.
+  evidence:
+    slot_5: installed
+  label: Bolt 5
+- id: torque_1
+  text: Torque the lug bolt in hole 1 with the torque wrench.
+  evidence:
+    slot_1: torqued
+  label: Torque 1
+- id: torque_3
+  text: Torque the lug bolt in hole 3 with the torque wrench.
+  evidence:
+    slot_3: torqued
+  label: Torque 3
+- id: torque_2
+  text: Torque the lug bolt in hole 2 with the torque wrench.
+  evidence:
+    slot_2: torqued
+  label: Torque 2
+- id: torque_5
+  text: Torque the lug bolt in hole 5 with the torque wrench.
+  evidence:
+    slot_5: torqued
+  label: Torque 5
+- id: torque_4
+  text: Torque the lug bolt in hole 4 with the torque wrench.
+  evidence:
+    slot_4: torqued
+  label: Torque 4
+order: groups
+off_sop: Any action that is not one of the steps above.
+idle: No one is working.
+decisions:
+  accept_confidence: 0.8
+  hold_seconds: 1
+  evidence_only_after: 1
+dataset:
+  format: timeline
+  dir: lug_bolts
+groups:
+- - place_1
+  - place_2
+  - place_3
+  - place_4
+  - place_5
+- sequence:
+  - torque_1
+  - torque_3
+  - torque_2
+  - torque_5
+  - torque_4

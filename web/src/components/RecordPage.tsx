@@ -1,15 +1,16 @@
+import { AppShell } from "../ui/AppShell";
 import { useCallback, useEffect, useState } from "react";
 import { httpApi, type Api } from "../api";
 import type { RecordingSop, RecordingStatus, RecordingSummary, SourceSpec } from "../types";
 import { TorqueButtons } from "./TorqueButtons";
 
-type Props = { api?: Api; poll?: number; confirm?: (message: string) => boolean; initialSop?: string };
+type Props = { api?: Api; poll?: number; confirm?: (message: string) => boolean; initialSop?: string; back?: string };
 
 /**
  * Record a camera into an SOP's dataset (no detector needed): video plus "torque reached" presses on the video's
  * timeline, written as runs/<name>/{video.mp4, torque.csv} and listed in splits.yaml.
  */
-export function RecordPage({ api = httpApi, poll = 1000, confirm = (m) => window.confirm(m), initialSop }: Props) {
+export function RecordPage({ api = httpApi, poll = 1000, confirm = (m) => window.confirm(m), initialSop, back }: Props) {
   const [sops, setSops] = useState<RecordingSop[]>([]);
   const [sources, setSources] = useState<SourceSpec[]>([]);
   const [sopFile, setSopFile] = useState("");
@@ -73,11 +74,7 @@ export function RecordPage({ api = httpApi, poll = 1000, confirm = (m) => window
   const sop = sops.find((s) => s.file === sopFile);
 
   return (
-    <main className="app record">
-      <header className="topbar card">
-        <div className="topbar-title"><span className="name">Record a run</span></div>
-        <div className="topbar-right"><a className="muted" href="#/">Back to the dashboard</a></div>
-      </header>
+    <AppShell title="Record a run" current="record" back={back ? { href: back, label: "Back to the SOP" } : undefined}>
       {error && <p className="error" role="alert">{error}</p>}
       <div className="latency-grid">
         <section className="card record-video" aria-label="Preview">
@@ -125,12 +122,12 @@ export function RecordPage({ api = httpApi, poll = 1000, confirm = (m) => window
           {discarded && <p role="status">{discarded}</p>}
           {saved && (
             <p role="status">
-              Saved {saved.run_id} ({saved.split}): {saved.seconds} s, {saved.presses} torque presses, in {saved.folder}.
-              Next: add steps.csv there (step_id,start_s,end_s).
+              Saved {saved.run_id} ({saved.split}): {saved.seconds} s, {saved.presses} torque presses.
+              {sop && <> Next: <a href={`#/sops/${sop.id}/timelines`}>label its timeline</a> in the SOP builder.</>}
             </p>
           )}
         </section>
       </div>
-    </main>
+    </AppShell>
   );
 }

@@ -19,13 +19,21 @@ export type SlotData = { at: [number, number]; filled_by: string | string[]; emp
 export type Evidence = "installed" | "empty" | "torqued";
 export type StepData = { id: string; text: string; label?: string; evidence?: Record<string, Evidence>; hands_off?: boolean };
 export type RunRow = { id: string; split: string | null; steps: boolean; draft: boolean; torque: boolean };
+export type StageId = "detector" | "recordings" | "layout" | "steps" | "timelines" | "train";
+/** What a builder stage still needs, in the user's words (computed by the server from the files). */
+export type StageStatus = { id: StageId; title: string; done: boolean; blockers: string[] };
 export type BuilderStatus = {
   errors: string[]; detector: boolean; roles: boolean; layout: boolean; steps: boolean;
   recordings: Record<string, number>; timelines: Record<string, number>; laya_checkpoint: string | null;
   published: boolean; loaded: boolean; draft: boolean; runs?: RunRow[];
+  stages: StageStatus[]; publish: { ready: boolean; blockers: string[] };
 };
 export type SopView = { id: string; file: string; draft: boolean; data: SopData; warnings: string[]; status: BuilderStatus };
-export type SopListEntry = { id: string; name: string; draft: boolean; published: boolean; loaded: boolean };
+export type SopListEntry = {
+  id: string; name: string; draft: boolean; published: boolean; loaded: boolean;
+  /** The recordings folder under datasets/ and how many runs it holds. */
+  dataset_dir?: string; runs?: number;
+};
 export type ModelEntry = { path: string; classes: string[] };
 export type JobStep = { name: string; argv: string[]; state: string; started: number | null; ended: number | null };
 export type Job = {
@@ -65,9 +73,10 @@ export type Checkpoints = {
 
 export type BuilderApi = {
   list(): Promise<SopListEntry[]>;
-  create(id: string, name: string, description: string): Promise<SopView>;
+  /** `recordingsFrom`: an SOP id whose recordings folder the new SOP shares. */
+  create(id: string, name: string, description: string, recordingsFrom?: string): Promise<SopView>;
   get(id: string): Promise<SopView>;
-  save(id: string, data: SopData): Promise<SopView>;
+  save(id: string, data: SopData, signal?: AbortSignal): Promise<SopView>;
   edit(id: string): Promise<SopView>;
   discard(id: string): Promise<SopView | { id: string; deleted: true }>;
   publish(id: string): Promise<SopView>;
@@ -101,9 +110,9 @@ const post = (body?: unknown): RequestInit => ({ method: "POST", body: body === 
 
 export const builderApi: BuilderApi = {
   list: () => call("/builder/sops"),
-  create: (id, name, description) => call("/builder/sops", post({ id, name, description })),
+  create: (id, name, description, recordingsFrom) => call("/builder/sops", post({ id, name, description, recordings_from: recordingsFrom ?? null })),
   get: (id) => call(`/builder/sops/${id}`),
-  save: (id, data) => call(`/builder/sops/${id}`, { method: "PUT", body: JSON.stringify({ data }) }),
+  save: (id, data, signal) => call(`/builder/sops/${id}`, { method: "PUT", body: JSON.stringify({ data }), signal }),
   edit: (id) => call(`/builder/sops/${id}/edit`, post()),
   discard: (id) => call(`/builder/sops/${id}/discard`, post()),
   publish: (id) => call(`/builder/sops/${id}/publish`, post()),

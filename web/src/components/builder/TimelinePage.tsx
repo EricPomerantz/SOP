@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { builderApi, type BuilderApi, type Job, type TimelineView } from "../../builderApi";
 import { normalize, problem, removeRow, rowAt, setBoundary, setStep, splitAt, type Row } from "../../timelineEdit";
+import { AppShell } from "../../ui/AppShell";
+import { StatusPill } from "../../ui/kit";
+import { stageHash } from "./stages";
 import { JobPanel } from "./JobPanel";
 
 type Props = { sopId: string; run: string; api?: BuilderApi };
@@ -72,6 +75,14 @@ export function TimelinePage({ sopId, run, api = builderApi }: Props) {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const video = useRef<HTMLVideoElement>(null);
+  // The labelling keys open by themselves the first time this page is used (per browser).
+  const [firstVisit] = useState(() => {
+    try {
+      const seen = window.localStorage.getItem("sop-timeline-help-seen");
+      window.localStorage.setItem("sop-timeline-help-seen", "1");
+      return !seen;
+    } catch { return true; }
+  });
 
   const load = useCallback(() => api.timeline(sopId, run).then((v) => {
     setView(v);
@@ -170,7 +181,7 @@ export function TimelinePage({ sopId, run, api = builderApi }: Props) {
       const v = await api.saveTimeline(sopId, run, rows);
       setView(v);
       setDirty(false);
-      setNotice("Saved steps.csv");
+      setNotice("Timeline saved");
     } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
   };
   const prepare = async () => {
@@ -180,7 +191,8 @@ export function TimelinePage({ sopId, run, api = builderApi }: Props) {
   };
   const prepared = (job: Job) => { if (job.state === "done") load(); };
 
-  if (!view) return <main className="app builder">{error ? <p className="error">{error}</p> : <p className="muted">Loading…</p>}</main>;
+  const back = { href: stageHash(sopId, "timelines"), label: "Back to the timelines" };
+  if (!view) return <AppShell title={`Label run ${run}`} back={back}>{error ? <p className="error">{error}</p> : <p className="muted">Loading…</p>}</AppShell>;
   const issue = problem(rows, view.duration);
   const current = rowAt(rows, t);
   const currentStep = rows[current]?.[0] ?? "";
@@ -188,17 +200,14 @@ export function TimelinePage({ sopId, run, api = builderApi }: Props) {
   const to = Math.min(duration, from + WINDOW);
 
   return (
-    <main className="app builder timeline-page">
-      <header className="topbar card">
-        <div className="topbar-title"><span className="name">Label run {run}</span>
-          {view.steps ? <span className="pill pill-ok">saved</span> : <span className="pill pill-idle">not saved yet</span>}
-          {dirty && <span className="pill pill-warn">unsaved</span>}</div>
-        <div className="topbar-right">
-          <button onClick={undo} disabled={!history.length}>Undo</button>
-          <button onClick={save} disabled={!!issue || (!dirty && !!view.steps)}>Save</button>
-          <a className="muted" href={`#/sops/${sopId}`}>Back to the SOP</a>
-        </div>
-      </header>
+    <AppShell title={`Label run ${run}`} subtitle={sopId} back={back} status={
+      <>
+        {dirty ? <StatusPill health="warn" label="Unsaved changes" /> : view.steps ? <StatusPill health="ok" label="Saved" /> : <StatusPill health="idle" label="Not saved yet" />}
+        <button onClick={undo} disabled={!history.length}>Undo</button>
+        <button className="primary" onClick={save} disabled={!!issue || (!dirty && !!view.steps)}>Save</button>
+      </>
+    }>
+      <div className="timeline-page" style={{ display: "contents" }}>
       {error && <p className="error" role="alert">{error}</p>}
       {notice && <p role="status" className="notice">{notice}</p>}
       <div className="label-grid">
@@ -238,7 +247,7 @@ export function TimelinePage({ sopId, run, api = builderApi }: Props) {
               </button>
             ))}
           </div>
-          <details className="muted keys">
+          <details className="muted keys" open={firstVisit}>
             <summary>How to label</summary>
             <p>Play the run and, the moment a step starts, press its key: that step then runs until the next press.
               Fetching the next part already counts as its step; idle is nobody working, off-SOP is anything that isn't a
@@ -290,6 +299,7 @@ export function TimelinePage({ sopId, run, api = builderApi }: Props) {
           </tbody>
         </table>
       </section>
-    </main>
+      </div>
+    </AppShell>
   );
 }

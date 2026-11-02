@@ -1,3 +1,4 @@
+import { AppShell } from "../ui/AppShell";
 import QRCode from "qrcode";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { httpApi, type Api } from "../api";
@@ -85,11 +86,7 @@ export function LatencyPage({ api = httpApi }: Props) {
   };
 
   return (
-    <main className="app latency">
-      <header className="topbar card">
-        <div className="topbar-title"><span className="name">Camera latency check</span></div>
-        <div className="topbar-right"><a className="muted" href="#/">Back to the dashboard</a></div>
-      </header>
+    <AppShell title="Camera latency check" current="latency">
       <div className="latency-grid">
         <section className="card latency-qr" aria-label="QR clock">
           <canvas ref={canvas} />
@@ -133,6 +130,6 @@ export function LatencyPage({ api = httpApi }: Props) {
           )}
         </section>
       </div>
-    </main>
+    </AppShell>
   );
 }

@@ -40,7 +40,7 @@ ask() {  # ask <prompt> <default> <choice>...  -> echoes the choice
   else echo "$reply"; fi
 }
 
-checkpoints() { find "$MODELS_DIR" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' 2>/dev/null | sort; }
+checkpoints() { find "$MODELS_DIR" -mindepth 2 -maxdepth 2 -type f -name model.safetensors -printf '%h\n' 2>/dev/null | xargs -r -n1 basename | sort; }
 
 interactive=0
 [[ -z $model && -t 0 ]] && interactive=1

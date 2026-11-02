@@ -318,6 +318,31 @@ def test_an_sop_built_in_the_ui_is_published_into_the_top_bar(tmp_path, monkeypa
         assert c.post("/builder/sops/wheel/edit").json()["draft"] is True
 
 
+def test_a_new_sop_can_reuse_another_sops_recordings(tmp_path):
+    (tmp_path / "sops").mkdir()
+    for run, split in (("r1", "train"), ("r2", "test")):
+        folder = tmp_path / "datasets" / "wheel_runs" / "runs" / run
+        folder.mkdir(parents=True)
+        (folder / "video.mp4").write_bytes(b"")
+    (tmp_path / "datasets" / "wheel_runs" / "splits.yaml").write_text("train: [r1]\ntest: [r2]\n")
+    with make_client(tmp_path, sops_dir=tmp_path / "sops", datasets_dir=tmp_path / "datasets",
+                     laya_registry=tmp_path / "registry.json") as c:
+        assert c.post("/builder/sops", json={"id": "wheel", "name": "Wheel"}).status_code == 201
+        data = c.get("/builder/sops/wheel").json()["data"]
+        data["dataset"] = {"format": "timeline", "dir": "wheel_runs"}
+        c.put("/builder/sops/wheel", json={"data": data})
+        assert c.get("/builder/sops").json()[0] | {"runs": 2, "dataset_dir": "wheel_runs"} == c.get("/builder/sops").json()[0]
+        r = c.post("/builder/sops", json={"id": "wheel_v2", "name": "Wheel v2", "recordings_from": "wheel"})
+        assert r.status_code == 201, r.text
+        assert r.json()["data"]["dataset"]["dir"] == "wheel_runs"
+        assert r.json()["status"]["recordings"] == {"train": 1, "val": 0, "test": 1}
+        assert r.json()["status"]["stages"][1]["blockers"] == ["Record at least one val run"]
+        assert r.json()["status"]["publish"]["ready"] is False
+        r = c.post("/builder/sops", json={"id": "wheel_v3", "recordings_from": "nope"})
+        assert r.status_code == 400 and "No SOP nope" in r.json()["detail"]
+        assert c.get("/builder/sops/wheel_v3").status_code == 404
+
+
 def test_the_builder_refuses_non_detection_uploads(tmp_path, monkeypatch):
     from sopvision.builder import detector as det
 
