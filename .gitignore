@@ -31,3 +31,6 @@ docker/certs/*
 # Recordings for timeline-format SOP datasets (large videos)
 datasets/
 web/e2e/test-results/
+
+# Hugging Face downloads (scripts/demo_assets.py)
+.cache/

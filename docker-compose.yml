@@ -288,6 +288,32 @@ services:
               count: all
               capabilities: [gpu]
 
+  # Demo assets (detectors, recordings, the fine-tuned Laya) from a private Hugging Face repo, written into this
+  # checkout as the host user: `docker compose run --rm demo-assets fetch [--all]` or `... publish` (scripts/demo_assets.py).
+  # HF_TOKEN and SOP_DEMO_REPO come from .env; corporate root CAs from CORP_CA_DIR, as for the model images.
+  demo-assets:
+    profiles: [demo]
+    image: ghcr.io/astral-sh/uv:0.9.5-python3.12-bookworm-slim
+    user: ${HOST_USER:-1000:1000}
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      HOME: /tmp
+      SSL_CERT_FILE: /tmp/ca.pem
+      REQUESTS_CA_BUNDLE: /tmp/ca.pem
+    working_dir: /repo
+    entrypoint:
+      - sh
+      - -c
+      - cat /etc/ssl/certs/ca-certificates.crt /certs/*.crt /certs/*.pem > /tmp/ca.pem 2>/dev/null;
+        exec uv run -q --no-project --with huggingface_hub==2.4.0 --with pyyaml==6.0.3 python scripts/demo_assets.py "$@"
+      - demo_assets
+    command: ["--help"]
+    volumes:
+      - .:/repo
+      - ${CORP_CA_DIR:-./docker/certs}:/certs:ro
+
   # Label Studio for reviewing detector labels: `docker compose --profile labelling up -d labelstudio`, then
   # http://localhost:8080. Frames are served from ./data (tasks from training/labelstudio.py with --doc-root data).
   labelstudio:

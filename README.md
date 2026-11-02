@@ -48,6 +48,16 @@ cp -n .env.example .env     # preserves an existing .env; configure the decision
 docker compose build sopvision
 ```
 
+**Demo assets.** Git doesn't carry the detectors, recordings or fine-tuned Laya. They live in a private Hugging Face repo at the same paths. On a fresh clone, `./start.sh` creates `.env` from the example, offers to download the assets, and asks for a Hugging Face read token (`HF_TOKEN`). For `jev`/`compare` it also asks for `TYPESAFE_API_KEY`. Both are saved to `.env`. You can also fetch the assets yourself:
+
+```bash
+docker compose run --rm demo-assets fetch         # app essentials + lug-bolt test runs (~3.4 GB)
+docker compose run --rm demo-assets fetch --all   # + every lug-bolt run (~6.7 GB)
+docker compose run --rm demo-assets publish       # from the machine that has them; needs a write token
+```
+
+`SOP_DEMO_REPO` names the repo (default `<HF user>/sop-demo`). On Linux with a user ID other than 1000, prefix the command with `HOST_USER=$(id -u):$(id -g)`. The set is listed in `scripts/demo_assets.py`.
+
 `.env` must be named exactly `.env`. `SOP_DATASET_DIR` selects the host dataset folder mounted at `/data`; timeline datasets and recordings use `./datasets`. A Vercel AI Gateway key also works with the two extra lines shown in `.env.example`.
 
 ## Run it
